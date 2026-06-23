@@ -1,0 +1,220 @@
+route-policy ibgp_export_inet_to_rr_from_int_rt
+  if destination in (10.135.198.176/28, 10.135.193.80/28, 10.135.54.128/30) then
+    done
+  endif
+  if destination in Reject-RFC1918 then
+    drop
+  endif
+  if destination in (10.190.30.113/32, 10.190.30.115/32) then
+    drop
+  endif
+  if community matches-any ESY_TMS_Tasinma_Gecici then
+    drop
+  endif
+  if community matches-any MOBIL-INTERNAL-DDOS-MITIGATION then
+    drop
+  endif
+  if destination in Voice-Customers then
+    set community Customer-Voice-Subnetted additive
+  endif
+  #ISG_SOL_RR_Deny
+  if community matches-any ISG_SOL_RR_Deny then
+    drop
+  endif
+  #ACCEPT TNAP PREFIXES
+  if community matches-any tier1_global_community then
+    done
+  endif
+  if community matches-any TTNET_TUZLA and destination in Default then
+    done
+  endif
+  if community matches-any VCNO_TUZLA and destination in Default then
+    done
+  endif
+  if community matches-any SEABONE and destination in Default then
+    done
+  endif
+  if community matches-any NSU_IPBB_GNS_1 or community matches-any NSU_IPBB_GNS_2 or community matches-any NSU_IPBB_TZL_1 or community matches-any NSU_IPBB_TZL_2 then
+    done
+  endif
+  if community matches-any BGP-Customers then
+    set next-hop self
+    done
+  endif
+  if as-path is-local then
+    done
+  endif
+  drop
+end-policy
+route-policy ibgp_export_inet_to_rr
+  #REJECT RFC1918
+  if destination in Reject-RFC1918 then
+    drop
+  endif
+  if community matches-any TT-BLACKHOLE then
+    drop
+  endif
+  #REJECT IR PREFIXES
+  if community matches-any INTEROUTE then
+    drop
+  endif
+  #REJECT NSU IPBB PREFIXES
+  if community matches-any NSU_IPBB_GNS_1 or community matches-any NSU_IPBB_GNS_2 or community matches-any NSU_IPBB_TZL_1 or community matches-any NSU_IPBB_TZL_2 then
+    drop
+  endif
+  #REJECT TR VOICE BACKBONE FOR EUROPE REDUNDANCY
+  if destination in TR_VOICE_BACKBONE then
+    drop
+  endif
+  if community matches-any SEABONE and destination in Default then
+    done
+  endif
+  if community matches-any BGP-Customers then
+    set next-hop self
+    done
+  endif
+  if as-path is-local then
+    done
+  endif
+  if community matches-any TTNet or community matches-any TTNET-ESN-KURUMSAL or community matches-any TTNET_ESENTEPE then
+    done
+  endif
+  drop
+end-policy
+route-policy ibgp_export_inet_to_rr_from_int_rt
+  if destination in (10.135.198.192/29, 10.135.198.168/29) then
+    done
+  endif
+  if destination in Reject-RFC1918 then
+    drop
+  endif
+  if community matches-any MOBIL-INTERNAL-DDOS-MITIGATION_IZMIR then
+    drop
+  endif
+  if destination in Voice-Customers then
+    set community Customer-Voice-Subnetted additive
+  endif
+  #ACCEPT TNAP PREFIXES
+  if community matches-any tier1_global_community then
+    done
+  endif
+  if community matches-any TTNET_IZMIR and as-path in TNET_OZEL then
+    done
+  endif
+  if community matches-any VCNO_IZMIR and destination in Default then
+    done
+  endif
+  if community matches-any BGP-Customers then
+    set next-hop self
+    done
+  endif
+  if as-path is-local then
+    done
+  endif
+  drop
+end-policy
+route-policy ibgp_export_inet_to_rr_from_int_rt
+  if destination in Reject-RFC1918 then
+    drop
+  endif
+  if destination in Voice-Customers then
+    set community Customer-Voice-Subnetted additive
+  endif
+  if community matches-any BGP-Customers then
+    set next-hop self
+    done
+  endif
+  if as-path is-local then
+    done
+  endif
+  drop
+end-policy
+route-policy ibgp_export_to_m40e2_inet_to_rr
+  #TOC SW MANAGEMENT
+  if destination in (10.135.198.232/29, 213.161.147.0/24, 176.235.122.0/24, 10.135.201.216/29) then
+    done
+  endif
+  #REJECT RFC1918
+  if destination in Reject-RFC1918 then
+    drop
+  endif
+  if community matches-any TT-BLACKHOLE then
+    drop
+  endif
+  #ISG_SOL_RR_Deny
+  if community matches-any ISG_SOL_RR_Deny then
+    drop
+  endif
+  #ACCEPT IR Default
+  if community matches-any INTEROUTE and destination in Default then
+    done
+  endif
+  #ACCEPT LEVEL3 Default
+  if community matches-any Level3_Esenyurt and destination in Default then
+    done
+  endif
+  #ACCEPT VCNO Default
+  if community matches-any VCNO_ESENYURT and destination in Default then
+    done
+  endif
+  #ACCEPT TNAP PREFIXES
+  if community matches-any tier1_global_community then
+    done
+  endif
+  #REJECT TR VOICE BACKBONE FOR EUROPE REDUNDANCY
+  if destination in TR_VOICE_BACKBONE then
+    drop
+  endif
+  if community matches-any BGP-Customers then
+    set next-hop self
+    done
+  endif
+  if as-path is-local then
+    done
+  endif
+  drop
+end-policy
+route-policy ibgp_export_to_m40e2_inet_to_rr
+  #REJECT RFC1918
+  if destination in Reject-RFC1918 then
+    drop
+  endif
+  if community matches-any TT-BLACKHOLE then
+    drop
+  endif
+  #ISG_SOL_RR_Deny
+  if community matches-any ISG_SOL_RR_Deny then
+    drop
+  endif
+  if community matches-any ESY_INT1_Arbor_Ozel_Community then
+    drop
+  endif
+  #ACCEPT IR PREFIXES
+  if community matches-any INTEROUTE and destination in Default then
+    done
+  endif
+  #ACCEPT VCNO PREFIXES
+  if community matches-any VCNO_ESENTEPE and destination in Default then
+    done
+  endif
+  #TTNET
+  if community matches-any TTNet or community matches-any TTNET-ESN-KURUMSAL or community matches-any TTNET_ESENTEPE and destination in Default then
+    done
+  endif
+  #ACCEPT NSU IPBB PREFIXES
+  if community matches-any NSU_IPBB_GNS_1 or community matches-any NSU_IPBB_GNS_2 or community matches-any NSU_IPBB_TZL_1 or community matches-any NSU_IPBB_TZL_2 then
+    done
+  endif
+  #REJECT TR VOICE BACKBONE FOR EUROPE REDUNDANCY
+  if destination in TR_VOICE_BACKBONE then
+    drop
+  endif
+  if community matches-any BGP-Customers then
+    set next-hop self
+    done
+  endif
+  if as-path is-local then
+    done
+  endif
+  drop
+end-policy

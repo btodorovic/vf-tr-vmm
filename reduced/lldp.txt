@@ -1,0 +1,6 @@
+edit
+set protocols lldp port-id-subtype interface-name
+set protocols lldp interface fxp0 disable
+set protocols lldp interface all enable
+commit and-quit
+quit

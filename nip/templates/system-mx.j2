@@ -1,0 +1,112 @@
+{% if (mgmt_ri_knob is defined) and {mgmt_ri_knob is not None) %}
+groups {
+    re0 {
+        system {
+            host-name {{ hostname }}-re0;
+        }
+        interfaces {                                                 ### Only if OOB MGMT is used, otherwise omit
+            fxp0 {
+                unit 0 {
+                    family inet {
+                        address {{ fxp0.vip }}/{{ fxp0.preflen }} {
+                            master-only;
+                        }
+                        address {{ fxp0.re0 }}/{{ fxp0.preflen }};
+                    }
+                }
+            }
+        }
+    }
+    re1 {
+        system {
+            host-name {{ hostname }}-re1;
+        }
+        interfaces {                                                  ### Only if OOB MGMT is used, otherwise omit
+            fxp0 {
+                unit 0 {
+                    family inet {
+                        address {{ fxp0.vip }}/{{ fxp0.preflen }} {
+                            master-only;
+                        }
+                        address {{ fxp0.re1 }}/{{ fxp0.preflen }};
+                    }
+                }
+            }
+        }
+    }
+}
+{% else %}
+groups {
+    re0 {
+        system {
+            host-name {{ hostname }}-re0;
+        }
+    }
+    re1 {
+        system {
+            host-name {{ hostname }}-re1;
+        }
+    }
+}
+{% endif %}
+
+apply-groups [ re0 re1 ];                                       
+
+system {
+    switchover-on-routing-crash;                                
+    no-redirects;
+    no-redirects-ipv6;                          
+    arp {
+        passive-learning;                       
+    }
+    internet-options {
+        icmpv4-rate-limit packet-rate 3000 bucket-size 3;
+        icmpv6-rate-limit packet-rate 3000 bucket-size 3;               
+        path-mtu-discovery;
+        no-source-quench;
+        no-tcp-reset drop-all-tcp;      # Do not send TCP reset for connections to non-listening ports
+        tcp-reset-syn-acknowledge;      # Send ACK to any SYN packet
+        tcp-drop-synfin-set;
+    }
+    commit {
+        fast-synchronize;                       
+        synchronize;                            
+    }
+}
+chassis {
+    craft-lockout;
+    network-services enhanced-ip;                  
+    redundancy {  
+        failover {
+            on-disk-failure;
+            on-loss-of-keepalives;
+        }
+    }
+}
+{% if (mgmt_ri_knob is defined) and {mgmt_ri_knob is not None) %}
+system {
+    backup-router {{ fxp0.gw }} destination 0.0.0.0/0;     ### Default gateway on the OOB DCN LAN segment (OOB MGMT ONLY!)
+    management-instance;                               ### Enables routing-instance mgmt_junos (OOB MGMT ONLY!)
+}
+routing-instances {                         ### Only if OOB MGMT is used, otherwise omit
+    mgmt_junos {
+        routing-options {
+            static {
+                route 0.0.0.0/0 {
+                    next-hop {{ fxp0.gw }};     ### Default gateway on the OOB DCN LAN segment
+                    retain;
+                    no-readvertise;
+                }
+            }
+        }
+    }
+}
+{% endif %}
+chassis { 
+    aggregated-devices {                       
+        ethernet {	
+            device-count 480;
+        } 
+        maximum-links 64;
+    }
+}

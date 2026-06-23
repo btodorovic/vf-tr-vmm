@@ -1,0 +1,51 @@
+system {
+    time-zone Europe/Amsterdam;
+    debugger-on-break;
+    dump-on-panic;
+    root-authentication {
+        encrypted-password "$1$ZUlES4dp$OUwWo1g7cLoV/aMWpHUnC/"; ## SECRET-DATA
+        ssh-rsa "ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAIEAndoan2TzmZp3J3UJjlXksF1DcJhntlLTs9mEVkY/0sTXTgqe75cVB9cwOY8Vsj9l3p6yOpO0cMwbxiWmLmnYzBDoeyTAKzFLr/Ccdm0NhMLFnP/pyewShQJNOJLPCERNxAWCQlrQnXE+UvqrY45fOQc4NnHhggBK3IdB6AcHOn8="; ## SECRET-DATA
+    }
+    login {
+        user btodorovic {
+            full-name "Berislav Todorovic, JNPR PS";
+            uid 2048;
+            class super-user;
+            authentication {
+                ssh-rsa "ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAIEAndoan2TzmZp3J3UJjlXksF1DcJhntlLTs9mEVkY/0sTXTgqe75cVB9cwOY8Vsj9l3p6yOpO0cMwbxiWmLmnYzBDoeyTAKzFLr/Ccdm0NhMLFnP/pyewShQJNOJLPCERNxAWCQlrQnXE+UvqrY45fOQc4NnHhggBK3IdB6AcHOn8="; ## SECRET-DATA
+                ssh-rsa "ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEAuqA6S3jWANSlmmH7biPPTS2+MP5p/BRfkxWh0YsLhC2+hbebhiO/NeU274K5yh/3E23SgOXTBCA6HYzM6SvI+8h4+7qK+hXFHZ3DF2i28pOBmaYsVGPNACSGCjAZbz/S/xGaTJNuMeML5Sw7HB25wfUVuggMR+b7FaKp5hy6Ui1tQKICB//AFOrU4TW9qIRtrYlTWsen8A1ioEbUK5ccJ+qRrq3BZNHRMY7xPgS1itpCJcBwEqPTRNgyfElehkfE/on7QhrmmiQPEakDbLXbxRSAqbOrxYL7WIDETw76J/fUoMjsqE3S/fBskk/YHbGeooclf6mcXovW8C3DVuJ2SQ=="; ## SECRET-DATA
+            }
+        }
+    }
+    services {
+        ftp;
+        ssh {
+	    root-login allow;
+	}
+        telnet;
+	netconf ssh;
+    }
+    processes {
+        routing enable;
+        ntp enable;
+        management enable;
+        watchdog enable;
+        snmp enable;
+        inet-process enable;
+        mib-process enable;
+    }
+    syslog {
+        file messages {
+            any notice;
+            authorization none;
+            kernel info;
+            pfe info;
+            interactive-commands none;
+            archive world-readable;
+            explicit-priority;
+        }
+    }
+    ntp {
+        server 66.129.255.62;
+    }
+}

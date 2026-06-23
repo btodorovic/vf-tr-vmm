@@ -1,0 +1,4927 @@
+# ------------------------------------------------------------------------------------ #
+#   Chapter 5 - BASIC CONFIGURATION AND OUT-OF-BAND MANAGEMENT                         #
+#               APPLY THIS CONFIGURATION FIRST WHEN YOU GET TO THE CONSOLE !!!         #
+# ------------------------------------------------------------------------------------ #
+#
+system {
+    host-name {{ hostname }};
+}
+interfaces {
+    re0:mgmt-0 {
+        unit 0 {
+            family inet {
+                address {{ fxp0.vip }}/{{ fxp0.preflen }} {          ### PLEASE REPLACE BY ACTUAL VALUES
+                    master-only;
+                }
+                address {{ fxp0.re0 }}/{{ fxp0.preflen }};           ### PLEASE REPLACE BY ACTUAL VALUES
+            }
+        }
+    }
+    re1:mgmt-0 {
+        unit 0 {
+            family inet {
+                address {{ fxp0.vip }}/{{ fxp0.preflen }} {         ### PLEASE REPLACE BY ACTUAL VALUES
+                    master-only;
+                }
+                address {{ fxp0.re1 }}/{{ fxp0.preflen }};          ### PLEASE REPLACE BY ACTUAL VALUES
+            }
+        }
+    }
+    GR-L3VPN {
+        routing-instances {
+            <*> {
+                routing-options {
+                    static {
+                        route 0.0.0.0/0 {
+                            discard;
+                            retain;
+                            no-readvertise;
+                            preference 4294967295;
+                        }
+                    }
+                    router-id {{ lo0.ip }};
+                    auto-export;
+                }
+                instance-type vrf;
+                vrf-table-label;
+            }
+        }
+    }
+}
+system {
+    backup-router {{ fxp0.gw }} destination 0.0.0.0/0;                     ### PLEASE REPLACE BY ACTUAL VALUES
+    root-authentication {
+        encrypted-password "$5$.RLTbwql$dqLAnT6tyx71ScZx3Xx0HQ5.susdzantvJg2OP5sVa8";
+    }
+    commit {
+        persist-groups-inheritance;
+    }
+    ports {
+        console {
+            log-out-on-disconnect;                   
+            inactive: insecure;
+            type vt100;
+        }
+    }
+    services {
+        ssh {
+            root-login deny;
+            protocol-version v2;
+        }
+    }
+}
+routing-instances {
+    mgmt_junos {
+        routing-options {
+            static {
+                route 0.0.0.0/0 {
+                    next-hop {{ fxp0.gw }};
+                    retain;
+                    no-readvertise;
+                    preference 254;
+                }
+                route 10.140.232.0/23 {
+                    next-hop {{ fxp0.gw }};
+                    retain;
+                    no-readvertise;
+                    preference 254;
+                }
+                route 10.152.170.200/32 {
+                    next-hop {{ fxp0.gw }};
+                    retain;
+                    no-readvertise;
+                    preference 254;
+                }
+            }
+        }
+    }
+}
+# ------------------------------------------------------------------------------------ #
+#   Chapter 5 - SYSTEM CONFIGURATION AND DEVICE MANAGEMENT                             #
+# ------------------------------------------------------------------------------------ #
+groups {
+    GR-SYSLOG {                                      # Group template for syslog - common params for syslog servers
+        system {
+            syslog {
+                host <*> {
+                    authorization any;
+                    cron any;
+                    daemon any;
+                    kernel any;
+                    user any;
+                    change-log any;
+                    interactive-commands any;
+                    facility-override local7;                      # As per current configuration
+                    explicit-priority;
+                    log-prefix {{ hostname }};                     # Router hostname
+                    source-address {{ lo0.ip1 }};                  # Management plane lo0.0 address 
+                }
+            }
+        }
+    }
+}
+system {
+{% if domainname is defined %}
+    domain-name {{ domainname }};
+{% endif %}
+    time-zone Europe/Ankara;
+    no-ping-record-route;
+    no-ping-time-stamp;
+    management-instance;
+    arp {
+        gratuitous-arp-on-ifup;
+    }
+    commit {
+        persist-groups-inheritance;
+    }
+    processes {
+        routing failover other-routing-engine;
+    }
+    inactive: authentication-order tacplus;
+    tacplus-server {
+    {% for host in tacplus.ip %}
+        {{ host }} {                        ### Repeat as necessary, for all TACACS+ servers
+            secret "{{ tacplus.key }}";
+            timeout 3;
+            source-address {{ lo0.ip1 }};
+            single-connection;
+            routing-instance {{ tacplus.vrf }};
+        }
+    {% endfor %}
+    }
+    accounting {
+        events [ login change-log interactive-commands ];
+        destination {
+            tacplus {
+                server {
+    {% for host in tacplus.ip %}
+                    {{ host }} {                        ### Repeat as necessary, for all TACACS+ servers
+                        port 49;
+                        secret "{{ tacplus.key }}";  
+                        timeout 3;
+                        single-connection;
+                        source-address {{ lo0.ip1 }};
+                        routing-instance {{ tacplus.vrf }};
+                    }
+    {% endfor %}
+                }
+            }
+        }
+    }
+    ntp {
+    {% if ntp.key is defined %}
+        authentication-key 1 type md5 value "{{ ntp.key }}";
+        trusted-key 1;
+    {% endif %}
+        source-address {{ lo0.ip1 }};
+    {% for host in ntp.ip %}
+        server {{ host }}{% if ntp.key is defined %} key 1{% endif %};
+    {% endfor %}
+    }
+    login {
+        message "************************************************************************\n*                                                                      *\n*       THIS SYSTEM IS FOR THE USE OF AUTHORISED USERS ONLY!           *\n*                                                                      *\n*  For unauthorized users all access is prohibited and protected by    *\n*  international law.                                                  *\n*                                                                      *\n*  Individuals using this system are subject to having all of their    *\n*  activities on this system monitored, logged and checked by systems  *\n*  and personnel.                                                      *\n*                                                                      *\n*  When you login to this host you automatically agree with the above  *\n*  mentioned terms!                                                    *\n*                                                                      *\n************************************************************************\n";
+        retry-options {
+            tries-before-disconnect 5;
+            backoff-threshold 3;
+            backoff-factor 5;
+            lockout-period 10;
+        }
+        idle-timeout 15;
+        class readonly {
+            idle-timeout 30;
+            permissions [ firewall interface network view routing ];
+        }
+        class limited_access {
+            idle-timeout 15;
+            login-alarms;
+            permissions [ network trace view view-configuration ];
+            allow-commands "show .*";
+            deny-commands "(clear|load|op|request|start|test).*";
+        }
+        class full_access {
+            idle-timeout 30;
+            permissions all;
+        }
+        user limitedaccess {
+            full-name "TACACS+ authenticated user - limited commands";
+            uid 2003;
+            class limited_access; 
+        }
+        user readonly {
+            full-name "TACACS+ authenticated user - readonly rights";
+            uid 2002;
+            class readonly;
+        }
+        user remote {
+            full-name "TACACS+ authenticated user - full rights";
+            uid 2001;
+            class full_access;
+        }
+        user vodafone {
+            full-name "VODAFONE - Last-resort account";
+            uid 2100;
+            class full_access;
+            authentication {
+                encrypted-password "$5$T5LOdyM3$Xjv9GOHdanLBejvrJF7lmjRC/2/yx/01gdY.jPFwjUC";
+            }
+        }
+        user juniper {
+            full-name "JUNIPER - Temporary account until TACACS+ is alive";
+            uid 2200;
+            class full_access;
+            authentication {
+                encrypted-password "$6$Q3FMdcI9$ETLypdlEEbKr3g1AHBJbWFK.ji3VgQpvAOlx30LT5oXdjCQvdXAvYxwsNYAKFx7q1eUxkfwuGRVEE5vmKR5NW1"; ## SECRET-DATA
+                ssh-rsa "ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAIEAndoan2TzmZp3J3UJjlXksF1DcJhntlLTs9mEVkY/0sTXTgqe75cVB9cwOY8Vsj9l3p6yOpO0cMwbxiWmLmnYzBDoeyTAKzFLr/Ccdm0NhMLFnP/pyewShQJNOJLPCERNxAWCQlrQnXE+UvqrY45fOQc4NnHhggBK3IdB6AcHOn8="; ## SECRET-DATA
+                ssh-rsa "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCeOsiBlVryIc5/0on2kDiPvoNflPAp/FympTUxzEEoHSCib9P+Otfa2bVnUnlHhkDd7fzZ3wExjrGt7IjuyfI3z6f+NjgYqWslYJJEO+2+XmGv6hSHO0kO1kPpPTmRNt37GK04XEiIc4LlL9lNVEuD38tgWalbI41aU9Pme33BVUk15eUDWEDbJe7djMZo7cpIcyXtJ+yQ+I5dblY23S9XhPlrdAOroqmE3G+w7fNNWocUqzIkJQ3l/D62PW/CRE4YAdvoLMFioMNvW7RiP0BzS3PDWBJBS7s+joT1SmNMFa1LJNRrfmHsaYYsTvavhdhbzFJK3K8vk2znpp5YVuOf"; ## SECRET-DATA
+            }
+        }
+        password {  
+            minimum-length 16;
+            maximum-length 20;
+            change-type set-transitions;
+            minimum-changes 4;
+            format sha256;
+        }
+    }
+    services {
+        ssh {
+            no-tcp-forwarding;
+            protocol-version v2;
+            max-sessions-per-connection 32;
+            ciphers [ aes128-ctr "aes128-gcm@openssh.com" aes192-ctr aes256-ctr "aes256-gcm@openssh.com" ];
+            macs [ hmac-sha2-256 "hmac-sha2-256-etm@openssh.com" hmac-sha2-512 "hmac-sha2-512-etm@openssh.com" ];
+            key-exchange [ curve25519-sha256 ecdh-sha2-nistp256 ecdh-sha2-nistp384 ecdh-sha2-nistp521 group-exchange-sha2 ];
+            client-alive-count-max 3;
+            client-alive-interval 120;
+            hostkey-algorithm {
+                no-ssh-dss;
+            }
+            connection-limit 10;
+            rate-limit 5;
+        }
+        netconf {
+            ssh {
+                connection-limit 10;              ### Can vary in production due to operational needs
+                rate-limit 10;                    ### Can vary in production due to operational needs
+            }
+        }
+    }
+    syslog {
+        archive size 10m files 10 world-readable;
+        time-format year millisecond;
+        file interactive-commands {
+            interactive-commands any;
+            match UI_CMDLINE_READ_LINE;
+        }
+        file messages {
+            any notice;
+            authorization any;
+            daemon info;
+            match "!.*(PING_TEST_COMPLETED|RPM_TEST_RESULTS|RPD_RT_HWM_NOTICE|aftd-trio|startup_time update|root@re[01] as root: cmd).*";
+        }
+        file firewall-log {
+            firewall any;
+            archive size 5m;
+        }
+        user * {
+            any critical;
+        }
+    {% for host in syslog %}
+        host {{ host }} {
+            apply-groups GR-SYSLOG;
+        }
+    {% endfor %}
+    }
+}
+chassis {
+    redundancy {                                   
+        routing-engine 0 master;
+        routing-engine 1 backup;
+        graceful-switchover;
+    }
+    routing-engine { 
+        on-disk-failure disk-failure-action reboot;
+    }
+}
+routing-options {
+    nonstop-routing;
+}
+{% if snmp is defined %}
+snmp {
+    engine-id {
+        local {{ hostname }};
+    }
+    {% if snmp_location is defined %}
+    location "{{ snmp_location }}";
+    {% endif %}
+    {% if snmp.contact is defined %}
+    contact "{{ snmp.contact }}";
+    {% endif %}
+    filter-interfaces {
+        all-internal-interfaces;
+    }
+    filter-duplicates;
+    trap-options {
+        source-address {{ lo0.ip1 }};
+    }
+    {% if snmp.v2 is defined %}
+        {% for cm in snmp.v2.communities %}
+    community {{ cm.name }} {
+        authorization {{ cm.type }};
+        clients {
+            {% if cm.clients is defined %}
+                {% for ip in cm.clients %}
+            {{ ip }};
+                {% endfor %}
+            0.0.0.0/0 restrict;
+            {% else %}
+            0.0.0.0/0;
+            {% endif %}
+        }
+    }
+        {% endfor %}
+        {% if snmp.v2.trap_targets is defined %}
+    trap-group TRAPS {
+        version v2;
+        categories {
+            authentication;
+            chassis;
+            link;
+            remote-operations;
+            routing;
+            startup;
+            rmon-alarm;
+            vrrp-events;
+            configuration;
+        }
+        targets {
+            {% for ip in snmp.v2.targets %}
+            {{ ip }};
+            {% endfor %}
+        }
+    }
+        {% endif %}{# trap_targets #}
+    {% endif %}{# SNMPv2 #}
+    {% if snmp.v3 is defined %}
+    v3 {
+        usm {
+            local-engine {
+        {% for user in snmp.v3.users %}
+                user {{ user.username }} {
+                    authentication-sha {
+                        authentication-password "{{ user.auth_pwd }}"; 
+                    }
+                    privacy-aes128 {
+                        privacy-password "{{ user.priv_pwd }}";
+                    }
+                }
+        {% endfor %}
+            }
+        }
+        vacm {
+            security-to-group {
+                security-model usm {
+        {% set snmp_groups = [] %}
+        {% for user in snmp.v3.users %}
+            {% do snmp_groups.append(user.group) %}
+                    security-name {{ user.username }} {      # Referenced above, 
+                        group {{ user.group }};
+                    }
+        {% endfor %}
+                }
+            }
+            access {
+        {% for group in snmp_groups %}
+                group {{ group }} {
+                    default-context-prefix {
+                        security-model usm {
+                            security-level privacy {
+                                read-view SNMP_allowed_MIB; 
+                                notify-view SNMP_allowed_MIB;
+                            }
+                        }
+                    }
+                }
+        {% endfor %}
+            }
+        }
+        {% for target in snmp.v3.targets %}
+        target-address {{ target.name }} {                 # Label to identify an SNMPv3 client 
+            address {{ target.ip }};                       # IP address of the SNMPv3 client
+            tag-list TAG_TRAP;                             # Label used to mark a client as SNMPv3 trap receiver
+            target-parameters TP-SNMPV3;
+        }
+        {% endfor %}
+        target-parameters TP-SNMPV3 {                      # Parameters of the SNMPv3 client
+            parameters {
+                message-processing-model v3;
+                security-model usm;
+                security-level privacy;
+                security-name {{ snmp.v3.users[0].username }};           # Username defined within the USM configuration above
+            }
+            notify-filter TRAP_FILTER;                 # Notification filter, defined below
+        }
+        notify-filter TRAP_FILTER {                    
+            oid .1 include;                                
+        }
+        notify TRAPS {                                     # Label to identify a trap group
+            type trap;
+            tag TAG_TRAP;                                  # Tag defined within the "tag-list" above
+        }
+    }
+    {% endif %}{# SNMPv3 #}
+    view SNMP_allowed_MIB {
+        oid system include;
+        oid transmission include;
+        oid interfaces include;
+        oid ip include;
+        oid icmp include;
+        oid mgmt include;
+        oid tcp include;
+        oid udp include;
+        oid enterprises include;
+        oid dot1dStp include;
+        oid vacmContextTable include;
+        oid ip.24 exclude;
+        oid dot3adAggPortSelectedAggID include;
+        oid jnxBgpM2PeerEntry include;
+        oid ipMRoute1 include;
+    }
+}
+{% endif %}
+
+# ------------------------------------------------------------------------------------ #
+#   Chapter 6 - INTERFACES                                                             #
+# ------------------------------------------------------------------------------------ #
+groups {
+    GR-CORE-INTF-LAG-MEMBER {
+        interfaces {
+            <*> {
+                traps;
+                hold-time up 2000 down 0;
+                damping {
+                    half-life 30;
+                    max-suppress 240;
+                    reuse 750;
+                    suppress 2000;
+                    enable;
+                }
+                optics-options {
+                    alarm low-light-alarm {
+                        syslog;
+                    }
+                    warning low-light-warning {
+                        syslog;
+                    }
+                }
+            }
+        }
+    }
+    GR-EDGE-INTF-LAG-MEMBER {
+        interfaces {
+            <*> {
+                traps;
+                hold-time up 2000 down 0;
+                optics-options {
+                    alarm low-light-alarm {
+                        syslog;
+                    }
+                    warning low-light-warning {
+                        syslog;
+                    }
+                }
+            }
+        }
+    }
+    GR-CORE-INTF-L3 {
+        interfaces {
+            <ae*> {
+                aggregated-ether-options {             # Do not use on JRR
+                    bfd-liveness-detection {
+                        version automatic;
+                        minimum-interval 30;
+                        multiplier 3;
+                        no-adaptation;
+                    }
+                    lacp {
+                        active; 
+                    }
+                }
+            }
+            "<[egx][te]-*>" {                          # Do not use on JRR
+                optics-options {
+                    alarm low-light-alarm {
+                        syslog;
+                    }
+                    warning low-light-warning {
+                        syslog;
+                    }
+                }
+            }
+            <*> {
+                traps;
+                mtu 9192;
+                hold-time up 2000 down 0;
+                damping {                             # Do not use on JRR!
+                    half-life 30;
+                    max-suppress 240;
+                    reuse 750;
+                    suppress 2000;
+                    enable;
+                }
+                unit <*> {
+                    traps;
+                    family iso;
+                    family inet6;
+                    family mpls {
+                        maximum-labels {% if 'PP' in hostname %}8{% else %}16{% endif %};
+                    }
+                }
+            }
+        }
+    }
+    GR-EDGE-INTF-L2 {
+        interfaces {
+            <ae*> {
+                aggregated-ether-options {
+                    lacp {
+                        active; 
+                    }
+                }
+            }
+            "<[egx][te]-*>" {
+                optics-options {
+                    alarm low-light-alarm {
+                        syslog;
+                    }
+                    warning low-light-warning {
+                        syslog;
+                    }
+                }
+            }
+            <*> {
+                traps;
+                mtu 9192;
+                hold-time up 2000 down 0;
+                unit <*> {
+                    traps;
+                }
+            }
+        }
+    }
+}
+chassis { 
+    aggregated-devices {                       
+        ethernet {  
+            device-count 128;
+        } 
+        maximum-links 64;
+    }
+}
+forwarding-options {
+    microbfd-bypass-route-lookup;              # Only on PTX
+}
+interfaces {
+    lo0 {
+        inactive: apply-groups GR-FF-RE-PROTECT;
+        unit 0 {
+            family inet {
+                address {{ lo0.ip }}/32 {
+                    primary;
+                    preferred;
+                }
+                address {{ lo0.ip1 }}/32;
+            }
+            family iso {
+                address {{ lo0.clns }};
+            }
+        }
+        unit 1 {
+            family inet {
+                address {{ lo0.ip1 }}/32;
+            }
+        }
+    }
+}
+# ------------------------------------------------------------------------------------ #
+#   Chapter 6.12 - LLDP                                                                #
+# ------------------------------------------------------------------------------------ #
+protocols {
+    lldp {
+        ptopo-configuration-trap-interval 60;
+        lldp-configuration-notification-interval 60;
+        port-id-subtype interface-name;
+        interface all {
+            disable;
+        }
+{% for ifd in interfaces %}{% if ifd.lag_members is defined or ifd.ifd[0:2]=='em' %}
+        interface {{ ifd.ifd }};
+{% endif %}{% endfor %}
+    }
+}
+# ------------------------------------------------------------------------------------ #
+#   Chapter 7 - COMMON ROUTING OPTIONS                                                 #
+# ------------------------------------------------------------------------------------ #
+routing-options {           
+    router-id {{ lo0.ip }};
+    autonomous-system 12302;
+    forwarding-table {
+        export PS-LOAD-BALANCE;
+    }
+    interface-routes {
+        rib-group inet RG-LOCAL-LOOPBACKS;
+    }
+    rib-groups {
+        RG-LOCAL-LOOPBACKS {
+            import-rib [ inet.0 inet.3 ];
+            import-policy PS-MY-LOCAL-LOOPBACK;
+        }
+        RG-REMOTE-LOOPBACKS {
+            import-rib [ inet.3 inet.0 inet6.3 ];
+        }
+    }
+}
+policy-options {    
+    policy-statement PS-LOAD-BALANCE {  
+        term NO-LB-ISIS {
+            from protocol isis;
+            then accept;
+        }
+        term OTHER {
+            then {  
+                load-balance per-packet;    
+            }
+        }
+    }
+    policy-statement PS-MY-LOCAL-LOOPBACK {
+        term LOCAL-LOOPBACKS {
+            from {
+                interface lo0.0;
+                route-filter 10.100.104.0/24 prefix-length-range /32-/32;
+            }
+            to rib inet.3;
+            then accept;
+        }
+        then reject;
+    }
+}
+# ------------------------------------------------------------------------------------ #
+#   Chapter 8 - IS-IS                                                                  #
+# ------------------------------------------------------------------------------------ #
+groups {
+    GR-ISIS {
+        protocols {
+            isis {
+                interface <*e*> {
+                    level 2 {
+                        post-convergence-lfa {
+                            node-protection cost 16777214;
+                            srlg-protection;
+                        }
+                    }
+                    lsp-interval 10;
+                    point-to-point;
+                }
+                level 1 disable;
+                level 2 {
+                    authentication-key "{{ isis.key }}";
+                    authentication-type md5;
+                    wide-metrics-only;
+                }
+                backup-spf-options {
+                    use-post-convergence-lfa maximum-labels 8;
+                    use-source-packet-routing;
+                    per-prefix-calculation;
+                }
+                lsp-lifetime 65535;
+                no-ipv6-routing;
+                spf-options {
+                    delay 50;
+                    holddown 2000;
+                    rapid-runs 5;
+                }
+            }
+        }
+    }
+    GR-ISIS-IF-BFD {
+        protocols {
+            isis {
+                interface <*e*> {
+                    family inet {
+                        bfd-liveness-detection {
+                            minimum-interval 50;
+                            multiplier 3;
+                            no-adaptation;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+protocols {
+    isis {
+        apply-groups GR-ISIS;
+        export PS-ISIS-EXPORT;
+        interface lo0.0 {
+            passive;
+        }
+        source-packet-routing {
+            srgb start-label 900000 index-range 99968;
+            node-segment {
+                ipv4-index {{ lo0.ip.split('.')[-1] }};
+                ipv6-index {{ 600 + (lo0.ip.split('.')[-1]|int) }};
+            }
+        }
+        traffic-engineering {
+            igp-topology;
+            advertisement always;
+        }
+        no-ipv6-routing;
+        overload{% if 'RR' not in hostname %} timeout 300{% endif %};
+{% for ifd in interfaces %}{% if ifd.isis is defined %}
+        interface {{ ifd.ifd }}{% if 'RR' not in ifd.remote %}.0{% endif %} {    ## NBR: {{ ifd.remote }}
+    {% if 'RR' in hostname or 'RR' in ifd.remote %}
+            apply-groups GR-ISIS-IF-BFD;
+    {% endif %}
+            level 1 disable;
+            level 2 metric {{ ifd.isis }};
+        }
+{% endif %}{% endfor %}        
+    }
+}
+policy-options {
+    policy-statement PS-ISIS-EXPORT {
+        term TR-LOCAL-LOOPBACK {
+            from {
+                protocol direct;
+                interface lo0.0;
+                route-filter 0.0.0.0/0 prefix-length-range /32-/32;
+            }
+            then accept;
+        }
+{% if 'PE' in hostname %}
+        term TR-SWITCH-MGMT {
+            from {
+                protocol static;
+                route-filter 10.245.1.0/24 prefix-length-range /32-/32;
+            }
+            then accept;
+        }
+{% endif %}
+    }
+}
+{% endif %}
+{% if 'SW' not in hostname %}
+# ------------------------------------------------------------------------------------ #
+#   Chapter 9 - BGP                                                                    #
+# ------------------------------------------------------------------------------------ #
+groups {
+    GR-BGP-VPN-ADD-PATH-SEND {
+        protocols {
+            bgp {
+                group <*> {
+                    family inet-vpn unicast add-path send path-count 2;
+                    family inet6-vpn unicast add-path send path-count 2;
+                }
+            }
+        }
+    }
+    GR-BGP-VPN-ADD-PATH-RECEIVE {
+        protocols {
+            bgp {
+                group <*> {
+                    family inet-vpn unicast add-path receive;
+                    family inet6-vpn unicast add-path receive;
+                }
+            }
+        }
+    }
+}
+protocols {
+    bgp {
+        precision-timers;
+        path-selection external-router-id;
+        snmp-options backward-traps-only-from-established; 
+        log-updown; 
+    }
+}
+{% if 'RR' in  hostname %}
+system {
+    processes {
+        routing {
+            force-64-bit;
+            bgp {
+                rib-sharding {
+                    number-of-shards 6;
+                }
+                update-threading {
+                    number-of-threads 6;
+                }
+            }
+        }
+    }
+}
+{% endif %}
+{% if 'RR41' in hostname %}
+protocols {
+    bgp {
+        group GR-IBGP-RR {
+            type internal;
+            description "IBGP Full Mesh for RR1s";
+            tcp-mss 4096;
+            authentication-key "{{ bgp.key }}";
+            export PS-IBGP-RR-EXPORT;
+            family inet {
+                labeled-unicast {
+                    rib-group RG-REMOTE-LOOPBACKS;
+                    add-path {
+                        send {
+                            path-count 2;
+                        }
+                    }
+                    per-prefix-label;
+                    rib {
+                        inet.3;
+                    }
+                }
+            }
+            family inet-vpn unicast;
+            family inet6-vpn unicast;
+            neighbor 10.100.104.1 description "ROBUC1RR41";
+            neighbor 10.100.104.3 description "ROCLU1RR41";
+            neighbor 10.100.104.5 description "ROBUC2RR41";
+            delete: neighbor {{ lo0.ip }};
+        }
+        group GR-RRC-PE {
+            apply-groups GR-BGP-VPN-ADD-PATH-SEND;
+            type internal;
+            description "CPN PE routers";
+            tcp-mss 4096;
+            authentication-key "{{ bgp.key }}";
+            cluster {{ lo0.ip }};                                   # Primary lo0.0 IP address of the RR
+            local-address {{ lo0.ip }};                             # Same as previous
+            family inet {
+                labeled-unicast {
+                    rib-group RG-REMOTE-LOOPBACKS;
+                    add-path {
+                        send {
+                            path-count 2;
+                        }
+                    }
+                    per-prefix-label;
+                    rib {
+                        inet.3;
+                    }
+                }
+            }
+            family inet-vpn unicast;
+            family inet6-vpn unicast;
+            vpn-apply-export;
+            import PS-IBGP-PE-IMPORT;
+            export PS-IBGP-PE-EXPORT;
+            neighbor 10.100.104.21 description "ROBUC1PE41";
+            neighbor 10.100.104.22 description "ROBUC1PE42";
+            neighbor 10.100.104.23 description "ROBUC2PE41";
+            neighbor 10.100.104.24 description "ROBUC2PE42";
+            neighbor 10.100.104.25 description "ROBUC3PE41";
+            neighbor 10.100.104.26 description "ROBUC3PE42";
+            neighbor 10.100.104.27 description "ROBUC4PE41";
+            neighbor 10.100.104.28 description "ROBUC4PE42";
+            neighbor 10.100.104.29 description "ROBUC6PE41";
+            neighbor 10.100.104.30 description "ROBUC6PE42";
+            neighbor 10.100.104.31 description "ROBAC1PE41";
+            neighbor 10.100.104.32 description "ROBAC1PE42";
+            neighbor 10.100.104.33 description "ROBRV1PE41";
+            neighbor 10.100.104.34 description "ROBRV1PE42";
+            neighbor 10.100.104.35 description "ROCLU1PE41";
+            neighbor 10.100.104.36 description "ROCLU1PE42";
+            neighbor 10.100.104.37 description "ROCLU2PE41";
+            neighbor 10.100.104.38 description "ROCLU2PE42";
+            neighbor 10.100.104.39 description "ROCRV1PE41";
+            neighbor 10.100.104.40 description "ROCRV1PE42";
+            neighbor 10.100.104.41 description "ROCTA1PE41";
+            neighbor 10.100.104.42 description "ROCTA1PE42";
+            neighbor 10.100.104.43 description "ROTIM1PE41";
+            neighbor 10.100.104.44 description "ROTIM1PE42";
+        }
+{% for region in ['DBC','CLU','PIP'] %}
+        group GR-RRC-BB-{{ region }} {
+            type internal;
+            description "eTN_BB routers in the region {{ region }}";
+            authentication-key "{{ bgp.key }}";
+            cluster {{ lo0.ip }};                                   # Primary lo0.0 IP address of the RR
+            local-address {{ lo0.ip }};                             # Same as previous
+            family inet-vpn unicast;
+            family inet6-vpn unicast;
+            vpn-apply-export;
+            inactive: import PS-IBGP-BB-IMPORT;                     # ACTIVATE ONLY AFTER ALL MIGRATIONS ARE DONE !!!
+            export PS-IBGP-BB-{{ region }}-EXPORT;                      # $REGION$ - may be: DBC, CLU, PIP
+        }
+{% endfor %}
+        group GR-RRC-P {
+            apply-groups GR-BGP-VPN-ADD-PATH-SEND;
+            type internal;
+            description "P (Juniper-IBG) routers";
+            tcp-mss 4096;
+            authentication-key "{{ bgp.key }}";
+            cluster {{ lo0.ip }};                                   # Primary lo0.0 IP address of the RR
+            local-address {{ lo0.ip }};                             # Primary lo0.0 IP address of the RR
+            family inet {
+                labeled-unicast {
+                    rib-group RG-REMOTE-LOOPBACKS;
+                    add-path {
+                        send {
+                            path-count 2;
+                        }
+                    }
+                    per-prefix-label;
+                    rib {
+                        inet.3;
+                    }
+                }
+            }
+            family inet-vpn unicast;
+            family inet6-vpn unicast;
+            vpn-apply-export;
+            export PS-IBGP-P-EXPORT;
+            neighbor 10.100.104.11 description "ROBUC1PP41";
+            neighbor 10.100.104.12 description "ROBUC1PP42";
+            neighbor 10.100.104.13 description "ROBRV1PP41";
+            neighbor 10.100.104.14 description "ROCLU1PP42";
+            neighbor 10.100.104.15 description "ROBUC2PP41";
+            neighbor 10.100.104.16 description "ROBUC6PP42";
+        }
+    }
+}
+policy-options {
+    policy-statement PS-MY-LOCAL-LOOPBACK {
+        term LOCAL-LOOPBACKS {
+            from {
+                interface lo0.0;
+                route-filter 10.100.104.0/24 prefix-length-range /32-/32;
+            }
+            to rib inet.3;
+            then accept;
+        }
+        then reject;
+    }
+    policy-statement PS-IBGP-RR-EXPORT {
+        term DENY-CWW-ROUTES {
+            from {
+                protocol bgp;
+                community CM-IGW-ANY;
+            }
+            then reject;
+        }
+    }
+    policy-statement PS-IBGP-PE-IMPORT {
+        term eTN-ONLY {
+            from community RT-GI;
+            from community RT-eTN-ALL;                     # REMOVE AFTER MIGRATION !!!
+            then accept;
+        }
+        term BLOCK-OTHER-VPNs {
+            from community RT-ANY;
+            then reject;
+        }
+    }
+    policy-statement PS-IBGP-PE-EXPORT {
+        term LOCAL-LOOPBACKS {
+            from {
+                protocol direct;
+                rib inet.3;
+                route-filter 0.0.0.0/0 prefix-length-range /32-/32;
+            }
+            then {
+                next-hop self;
+                accept;
+            }
+        }
+        term BLOCK-BGP-LU {
+            from {
+                protocol bgp;
+                rib inet.3;
+            }
+            then reject;
+        }
+        term CPN-ONLY {
+            from community RT-GI;
+            from community RT-CPN-ALL;                     # REMOVE AFTER MIGRATION !!!
+            then accept;
+        }
+        term BLOCK-OTHER-VPNs {
+            from community RT-ANY;
+            then reject;
+        }
+    }
+    policy-statement PS-IBGP-PE-FULLGRT-EXPORT {
+        term LOCAL-LOOPBACKS {
+            from {
+                protocol direct;
+                rib inet.3;
+                route-filter 0.0.0.0/0 prefix-length-range /32-/32;
+            }
+            then {
+                next-hop self;
+                accept;
+            }
+        }
+        term BLOCK-BGP-LU {
+            from {
+                protocol bgp;
+                rib inet.3;
+            }
+            then reject;
+        }
+        term CPN-PLUS-FULL-GRT {
+            from community [ RT-GI RT-INTERNET ];
+            then accept;
+        }
+        term BLOCK-OTHER-VPNs {
+            from community RT-ANY;
+            then reject;
+        }
+    }
+    policy-statement PS-IBGP-BB-IMPORT {
+        term BH-INTERNAL-VPN {
+            from {
+                community [ RT-S1X2 RT-S1X2_SEC RT-IUB RT-IUB_SHARED RT-OAM_SHARED RT-ABIS_SHARED RT-BH-ORO ];
+            }
+            then reject;
+        }
+    }
+    policy-statement PS-IBGP-BB-CLU-EXPORT {
+        term CLU-BGP {
+            from {
+                protocol bgp;
+                community CM-CLU;
+            }
+            then {
+                metric 0;
+                accept;
+            }
+        }
+        term DBC-BGP {
+            from {
+                protocol bgp;
+                community CM-DBC;
+            }
+            then {
+                metric 100;
+                accept;
+            }
+        }
+        term PIP-BGP {
+            from {
+                protocol bgp;
+                community CM-PIP;
+            }
+            then {
+                metric 200;
+                accept;
+            }
+        }
+    }
+    policy-statement PS-IBGP-BB-DBC-EXPORT {
+        term DBC-BGP {
+            from {
+                protocol bgp;
+                community CM-DBC;
+            }
+            then {
+                metric 0;
+                accept;
+            }
+        }
+        term CLU-BGP {
+            from {
+                protocol bgp;
+                community CM-CLU;
+            }
+            then {
+                metric 100;
+                accept;
+            }
+        }
+        term PIP-BGP {
+            from {
+                protocol bgp;
+                community CM-PIP;
+            }
+            then {
+                metric 200;
+                accept;
+            }
+        }
+    }
+    policy-statement PS-IBGP-BB-PIP-EXPORT {
+        term PIP-BGP {
+            from {
+                protocol bgp;
+                community CM-PIP;
+            }
+            then {
+                metric 0;
+                accept;
+            }
+        }
+        term CLU-BGP {
+            from {
+                protocol bgp;
+                community CM-CLU;
+            }
+            then {
+                metric 100;
+                accept;
+            }
+        }
+        term DBC-BGP {
+            from {
+                protocol bgp;
+                community CM-DBC;
+            }
+            then {
+                metric 200;
+                accept;
+            }
+        }
+    }
+    policy-statement PS-IBGP-P-EXPORT {
+        term LOCAL-LOOPBACKS {
+            from {
+                protocol direct;
+                rib inet.3;
+                route-filter 0.0.0.0/0 prefix-length-range /32-/32;
+            }
+            then {
+                next-hop self;
+                accept;
+            }
+        }
+        term DENY-CWW-ROUTES {
+            from {
+                protocol bgp;
+                community CM-IGW-ANY;
+            }
+            then reject;
+        }
+        term INTERNET-ROUTES {
+            from {
+                family inet-vpn;
+                community RT-INTERNET;
+            }
+            then accept;
+        }
+        term INTERNET-ROUTES-v6 {
+            from {
+                family inet6-vpn;
+                community RT-INTERNET;
+            }
+            then accept;
+        }
+        then reject;
+    }
+    community CM-DBC members [ 12302:1273 12302:801. ];                   # Routes received from DBC-P1 / DBC-P2 IGWs
+    community CM-PIP members [ 12302:1273 12302:802. ];                   # Routes received from PIP-P1 / UNI-P2 IGWs
+    community CM-CLU members [ 12302:1273 12302:803. ];                   # Routes received from BRV-P1 / CLU-P2 IGWs
+    community CM-BRV-BLUE members 12302:8031;
+    community CM-CLJ-RED members 12302:8032;
+    community CM-DBC-BLUE members 12302:8011;
+    community CM-DBC-RED members 12302:8012;
+    community CM-PEERING members "12302:9[0-9]0[0-9]";
+    community CM-PIP-BLUE members 12302:8021;
+    community CM-UNI-RED members 12302:8022;
+    community RT-INTERNET members target:12302:3343;
+    community RT-GI members target:64512:5;
+    community CM-IGW-ANY members 12302:1273;
+    community CM-NO-ADVERTISE members no-advertise;
+    community CM-NO-EXPORT members no-export;
+    community RT-ANY members target:*:*;
+    community RT-CPN-ALL members target:64512:*;
+    community RT-eTN-ALL members target:12302:*;
+    community RT-S1X2 members target:12302:2564;
+    community RT-S1X2_SEC members target:12302:3195;
+    community RT-IUB members "target:12302:141[67]";
+    community RT-OAM_SHARED members "target:12302:336[67]";
+    community RT-ABIS_SHARED members "target:12302:336[45]";
+    community RT-IUB_SHARED members "target:12302:336[23]";
+    community RT-BH-ORO members "target:8953:400[123]030[01]";
+}
+{% elif 'RR42' in hostname %}
+protocols {
+    bgp {
+        group GR-IBGP-RR {
+            type internal;
+            description "IBGP Full Mesh for RR2s";
+            tcp-mss 4096;
+            authentication-key "{{ bgp.key }}";
+            advertise-inactive;                                     # See 10.6.2
+            vpn-apply-export;
+            family inet {
+                labeled-unicast {
+                    rib-group RG-REMOTE-LOOPBACKS;
+                    add-path {
+                        send path-count 2;
+                        receive;
+                    }
+                    per-prefix-label;
+                    rib inet.3;
+                }
+            }
+            family inet-vpn {
+                unicast {
+                    add-path {
+                        receive;
+                        send {
+                            path-count 4;
+                        }
+                    }
+                }
+            }
+            family inet6-vpn {
+                unicast {
+                    add-path {
+                        receive;
+                        send {
+                            path-count 4;
+                        }
+                    }
+                }
+            }
+            family inet-mvpn signaling;
+            family inet6-mvpn signaling;
+            family evpn signaling;
+            neighbor 10.100.104.2 description "ROBUC1RR42";
+            neighbor 10.100.104.4 description "ROCLU1RR42";
+            neighbor 10.100.104.6 description "ROBUC2RR42";
+            delete: neighbor {{ lo0.ip }};
+        }
+        group GR-RRC-PE {
+            type internal;
+            description "PE routers";
+            tcp-mss 4096;
+            authentication-key "{{ bgp.key }}";
+            inactive: import PS-IBGP-PE-IMPORT;                     # USE AFTER MIGRATION (OMIT DURING MIGRATION) !!!
+            export PS-IBGP-PE-EXPORT;
+            advertise-inactive;                                     # See 10.6.2
+            cluster {{ lo0.ip }};                                   # Primary lo0.0 IP address of the RR
+            local-address {{ lo0.ip }};                             # Same as previous
+            vpn-apply-export;
+            family inet {
+                labeled-unicast {
+                    rib-group RG-REMOTE-LOOPBACKS;
+                    add-path {
+                        send {
+                            path-count 2;
+                        }
+                    }
+                    per-prefix-label;
+                    rib {
+                        inet.3;
+                    }
+                }
+            }
+            family inet-vpn {
+                unicast {
+                    add-path {
+                        receive;
+                        send {
+                            path-count 4;
+                        }
+                    }
+                }
+            }
+            family inet6-vpn {
+                unicast {
+                    add-path {
+                        receive;
+                        send {
+                            path-count 4;
+                        }
+                    }
+                }
+            }
+            family inet-mvpn signaling;
+            family inet6-mvpn signaling;
+            family evpn signaling;
+            neighbor 10.100.104.21 description "ROBUC1PE41";
+            neighbor 10.100.104.22 description "ROBUC1PE42";
+            neighbor 10.100.104.23 description "ROBUC2PE41";
+            neighbor 10.100.104.24 description "ROBUC2PE42";
+            neighbor 10.100.104.25 description "ROBUC3PE41";
+            neighbor 10.100.104.26 description "ROBUC3PE42";
+            neighbor 10.100.104.27 description "ROBUC4PE41";
+            neighbor 10.100.104.28 description "ROBUC4PE42";
+            neighbor 10.100.104.29 description "ROBUC6PE41";
+            neighbor 10.100.104.30 description "ROBUC6PE42";
+            neighbor 10.100.104.31 description "ROBAC1PE41";
+            neighbor 10.100.104.32 description "ROBAC1PE42";
+            neighbor 10.100.104.33 description "ROBRV1PE41";
+            neighbor 10.100.104.34 description "ROBRV1PE42";
+            neighbor 10.100.104.35 description "ROCLU1PE41";
+            neighbor 10.100.104.36 description "ROCLU1PE42";
+            neighbor 10.100.104.37 description "ROCLU2PE41";
+            neighbor 10.100.104.38 description "ROCLU2PE42";
+            neighbor 10.100.104.39 description "ROCRV1PE41";
+            neighbor 10.100.104.40 description "ROCRV1PE42";
+            neighbor 10.100.104.41 description "ROCTA1PE41";
+            neighbor 10.100.104.42 description "ROCTA1PE42";
+            neighbor 10.100.104.43 description "ROTIM1PE41";
+            neighbor 10.100.104.44 description "ROTIM1PE42";
+        }
+        group GR-RRC-BB {
+            type internal;
+            description "BB routers";
+            authentication-key "{{ bgp.key }}";
+            import PS-IBGP-BB-IMPORT;
+            export PS-IBGP-BB-EXPORT;
+            cluster {{ lo0.ip }};                                   # Primary lo0.0 IP address of the RR
+            local-address {{ lo0.ip }};                             # Same as previous
+            vpn-apply-export;
+            family inet-vpn unicast;
+            family inet6-vpn unicast;
+        }
+        group GR-RRC-P {
+            type internal;
+            description "P (Juniper-IBG) routers";
+            tcp-mss 4096;
+            authentication-key "{{ bgp.key }}";
+            cluster {{ lo0.ip }};                                   # Primary lo0.0 IP address of the RR
+            local-address {{ lo0.ip }};                             # Primary lo0.0 IP address of the RR
+            advertise-inactive;                                     # See 10.6.2
+            export PS-IBGP-P-EXPORT;
+            vpn-apply-export;
+            family inet {
+                labeled-unicast {
+                    rib-group RG-REMOTE-LOOPBACKS;
+                    add-path {
+                        send {
+                            path-count 2;
+                        }
+                    }
+                    per-prefix-label;
+                    rib {
+                        inet.3;
+                    }
+                }
+            }
+            neighbor 10.100.104.11 description "ROBUC1PP41";
+            neighbor 10.100.104.12 description "ROBUC1PP42";
+            neighbor 10.100.104.13 description "ROBRV1PP41";
+            neighbor 10.100.104.14 description "ROCLU1PP42";
+            neighbor 10.100.104.15 description "ROBUC2PP41";
+            neighbor 10.100.104.16 description "ROBUC6PP42";
+        }
+    }
+}
+
+policy-options {
+    policy-statement PS-MY-LOCAL-LOOPBACK {
+        term LOCAL-LOOPBACKS {
+            from {
+                interface lo0.0;
+                route-filter 10.100.104.0/24 prefix-length-range /32-/32;
+            }
+            to rib inet.3;
+            then accept;
+        }
+        then reject;
+    }
+    policy-statement PS-IBGP-BB-EXPORT {
+        term BH-INTERNAL-VPN {
+            from {
+                community [ RT-S1X2 RT-S1X2_SEC RT-IUB RT-IUB_SHARED RT-OAM_SHARED RT-ABIS_SHARED RT-BH-ORO ];
+            }
+            then accept;
+        }
+        then reject;
+    }
+    policy-statement PS-IBGP-BB-IMPORT {
+        term BH-INTERNAL-VPN {
+            from {
+                community [ RT-S1X2 RT-S1X2_SEC RT-IUB RT-IUB_SHARED RT-OAM_SHARED RT-ABIS_SHARED RT-BH-ORO ];
+            }
+            then accept;
+        }
+        then reject;
+    }
+    policy-statement PS-IBGP-P-EXPORT {
+        term LOCAL-LOOPBACKS {
+            from {
+                protocol direct;
+                rib inet.3;
+                route-filter 0.0.0.0/0 prefix-length-range /32-/32;
+            }
+            then {
+                next-hop self;
+                accept;
+            }
+        }
+    }
+    policy-statement PS-IBGP-PE-EXPORT {
+        term LOCAL-LOOPBACKS {
+            from {
+                protocol direct;
+                rib inet.3;
+                route-filter 0.0.0.0/0 prefix-length-range /32-/32;
+            }
+            then {
+                next-hop self;
+                accept;
+            }
+        }
+        term MVPN {
+            from family inet-mvpn;
+            then accept;
+        }
+        term MVPNv6 {
+            from family inet6-mvpn;
+            then accept;
+        }
+        term CPN-ONLY {
+            from community [ RT-CPN-ALL RT-ORO-ALL ];
+            then accept;
+        }
+        term BLOCK-OTHER-VPNs {
+            from community RT-ANY;
+            then reject;
+        }
+    }
+    policy-statement PS-IBGP-PE-IMPORT {
+        term CPN-ONLY {
+            from community RT-GI;
+            then reject;
+        }
+    }
+    community RT-INTERNET members target:12302:3343;
+    community RT-GI members target:64512:5;
+    community RT-S1X2 members target:12302:2564;
+    community RT-S1X2_SEC members target:12302:3195;
+    community RT-IUB members "target:12302:141[67]";
+    community RT-OAM_SHARED members "target:12302:336[67]";
+    community RT-ABIS_SHARED members "target:12302:336[45]";
+    community RT-IUB_SHARED members "target:12302:336[23]";
+    community RT-BH-ORO members "target:8953:400[123]030[01]";
+    community CM-NO-ADVERTISE members no-advertise;
+    community CM-NO-EXPORT members no-export;
+    community RT-ANY members target:*:*;
+    community RT-CPN-ALL members target:64512:*;
+    community RT-eTN-ALL members target:12302:*;
+    community RT-ORO-ALL members target:8953:*;
+}
+{% elif 'PE' in hostname %}
+protocols {
+    bgp {
+        group GR-IBGP-RR1 {
+            type internal;
+            tcp-mss 4096;
+            authentication-key "{{ bgp.key }}";
+            local-address {{ lo0.ip }};                             # Primary lo0.0 IP address of the RR
+            apply-groups GR-BGP-VPN-ADD-PATH-RECEIVE;
+            vpn-apply-export;
+            export PS-IBGP-RR1-EXPORT;
+            family inet {
+                labeled-unicast {
+                    rib-group RG-REMOTE-LOOPBACKS;
+                    add-path {
+                        send {
+                            path-count 2;
+                        }
+                    }
+                    per-prefix-label;
+                    rib {
+                        inet.3;
+                    }
+                }
+            }
+            family inet-vpn {
+                unicast;
+            }
+            family inet6-vpn {
+                unicast;
+            }
+            neighbor 10.100.104.1 description "ROBUC1RR41";
+            neighbor 10.100.104.3 description "ROCLU1RR41";
+            neighbor 10.100.104.5 description "ROBUC2RR41";
+        }
+        group GR-IBGP-RR2 {
+            type internal;
+            local-address {{ lo0.ip }};                             # Primary lo0.0 IP address of the RR
+            tcp-mss 4096;
+            authentication-key "{{ bgp.key }}";
+            advertise-external;                                     # Always prefer external routes over internal
+            vpn-apply-export;
+            export PS-IBGP-RR2-EXPORT;
+            family inet {
+                labeled-unicast {
+                    rib-group RG-REMOTE-LOOPBACKS;                  # Copy eTN_BB loopbacks from inet.3 to inet.0
+                    rib inet.3;
+                    add-path receive;
+                    per-prefix-label;                               # Assign a separate label per each lo0 /32
+                }
+                unicast;
+            }
+            family inet-vpn {
+                unicast {
+                    add-path {
+                        receive;
+                        send {
+                            path-count 4;
+                        }
+                    }
+                }
+            }
+            family inet6-vpn {
+                unicast {
+                    add-path {
+                        receive;
+                        send {
+                            path-count 4;
+                        }
+                    }
+                }
+            }
+            family inet-mvpn signaling;
+            family inet6-mvpn signaling;
+            family evpn signaling;
+            neighbor 10.100.104.2 description "ROBUC1RR42";
+            neighbor 10.100.104.4 description "ROCLU1RR42";
+            neighbor 10.100.104.6 description "ROBUC2RR42";
+        }
+        group GR-eTN-BB {
+            type internal;
+            authentication-key "{{ bgp.key }}";
+            advertise-inactive;                                     # See 10.6.2
+            cluster {{ lo0.ip }};                                   # Primary lo0.0 IP address of the RR
+            local-address {{ lo0.ip }};                             # Primary lo0.0 IP address of the RR
+            family inet {
+                labeled-unicast {
+                    rib-group RG-REMOTE-LOOPBACKS;                  # Copy eTN_BB loopbacks from inet.3 to inet.0
+                    rib inet.3;
+                    per-prefix-label;                               # Assign a separate label per each lo0 /32
+                }
+            }
+            import PS-IBGP-BB-IMPORT;
+            export PS-IBGP-BB-EXPORT;
+    {% for BB in eTN_BB %}
+            neighbor {{ BB.ip }} description "{{ BB.hostname }}";
+    {% endfor %}
+        }
+        group GR-IBGP-PE-LOCAL {
+            type internal;
+            local-address {{ lo0.ip }};                             # Primary lo0.0 IP address of the RR
+            import PS-IBGP-PE-LOCAL-IMPORT;
+            family inet-vpn {
+                unicast;
+            }
+            family inet6-vpn {
+                unicast;
+            }
+            authentication-key "$9$4rZGiHqfn/tf5cleK8LgoJGkPz39ApB5QBE"; ## SECRET-DATA
+            export PS-IBGP-PE-LOCAL-EXPORT;
+            tcp-mss 4096;
+            {% set host_id = hostname[-1]|int %}
+            {% if host_id == 1 %}
+            neighbor {{ lo0.ip.split('.')[0:3]|join('.') + '.' + (lo0.ip.split('.')[-1]|int+1)|string }} {
+                description ROBRV1PE4{{ host_id + 1 }};
+            }
+            {% else %}
+            neighbor {{ lo0.ip.split('.')[0:3]|join('.') + '.' + (lo0.ip.split('.')[-1]|int-1)|string }} {
+                description ROBRV1PE4{{ host_id - 1 }};
+            }
+            {% endif %}
+            vpn-apply-export;
+        }
+    }
+}
+policy-options {
+    policy-statement PS-IBGP-PE-LOCAL-EXPORT {
+        term BGP {
+            from protocol bgp;
+            then {
+                next-hop self;
+                accept;
+            }
+        }
+    }
+    policy-statement PS-IBGP-PE-LOCAL-IMPORT {
+        term 5 {
+            from community CM-12302:999;
+            then accept;
+        }
+        then reject;
+    }
+    policy-statement PS-IBGP-BB-IMPORT {
+        term BLOCK-LOOPS {
+            from {
+                protocol bgp;               
+            }
+            then {
+                community add CM-LU-eTN-{{ site.alias }};
+                accept;
+            }
+        }
+    }
+    policy-statement PS-IBGP-BB-EXPORT {
+        term BLOCK-LOOPS {
+            from {
+                protocol bgp;
+                rib inet.3;
+                community CM-LU-eTN-{{ site.alias }};      ## If route is already received from eTN via other PE, block it
+            }
+            then reject;
+        }
+        term IPV4-LU {
+            from {
+                protocol [ bgp direct ];
+                rib inet.3;
+            }
+            then {
+                next-hop self;
+                accept;
+            }
+        }
+        then reject;
+    }
+    policy-statement PS-IBGP-RR1-EXPORT {
+        term LOCAL-LOOPBACKS {
+            from {
+                protocol direct;
+                rib inet.3;
+                route-filter 0.0.0.0/0 prefix-length-range /32-/32;
+            }
+            then {
+                next-hop self;
+                accept;
+            }
+        }
+        term OTHER-BGP {
+            from protocol bgp;
+            then {
+                next-hop self;
+                accept;
+            }
+        }
+    }
+    policy-statement PS-IBGP-RR2-EXPORT {
+        term LOCAL-LOOPBACKS {
+            from {
+                protocol direct;
+                rib inet.3;
+                route-filter 0.0.0.0/0 prefix-length-range /32-/32;
+            }
+            then {
+                next-hop self;
+                accept;
+            }
+        }
+        term LOCAL-BGP {
+            from {
+                community CM-LU-eTN-{{ site.alias }};
+                state inactive;
+            }
+            then reject;
+        }
+        term OTHER-BGP {
+            from protocol bgp;
+            then {
+                next-hop self;
+                accept;
+            }
+        }
+    }
+{% if site.name in ['BUC1','BUC2','CLU1'] %}
+    policy-statement PS-IBGP-CPN3-IMPORT {
+        term BLOCK-LOOPS {
+            from {
+                protocol bgp;
+                rib inet.3;
+                community CM-LU-CPN4;   ## If route is already advertised to CPN3 via other PE, block it
+            }
+            then reject;
+         }
+         term TAG-LU-ROUTES {
+            from {
+                protocol bgp;
+                rib inet.3;               
+            }
+            then {
+                community add CM-LU-CPN3;
+                accept;
+            }
+        }
+    }
+{% endif %}
+    policy-statement PS-MY-LOCAL-LOOPBACK {
+        term LOCAL-LOOPBACKS {
+            from {
+                interface lo0.0;
+                route-filter 10.100.104.0/24 prefix-length-range /32-/32;
+            }
+            to rib inet.3;
+            then accept;
+        }
+        then reject;
+    }
+    community RT-GI members target:64512:5;
+    community RT-INTERNET members target:12302:3343;
+    community CM-NO-ADVERTISE members no-advertise;
+    community CM-NO-EXPORT members no-export;
+    community CM-LU-eTN-{{ site.alias }} members 64512:{{ 65000 + site.id }};
+    community RT-ANY members target:*:*;
+    community RT-CPN-ALL members target:64512:*;
+    community RT-eTN-ALL members target:12302:*;
+    community CM-LU-CPN3 members 12302:3333;
+    community CM-LU-CPN4 members 12302:4444;
+    community CM-12302:999 members 12302:999;
+}
+{% elif 'PP' in hostname %}
+protocols {
+    bgp {
+        group GR-IBGP-RR1 {
+            apply-groups GR-BGP-VPN-ADD-PATH-RECEIVE;
+            type internal;
+            tcp-mss 4096;
+            authentication-key "{{ bgp.key }}";
+            local-address {{ lo0.ip }};
+            export PS-IBGP-RR1-EXPORT;
+            vpn-apply-export;
+            family inet {
+                labeled-unicast {
+                    rib-group RG-REMOTE-LOOPBACKS;
+                    add-path {
+                        receive;
+                    }
+                    per-prefix-label;
+                    rib {
+                        inet.3;
+                    }
+                }
+            }
+            family inet-vpn unicast;
+            family inet6-vpn unicast;
+            neighbor 10.100.104.1 description "ROBUC1RR41";
+            neighbor 10.100.104.3 description "ROCLU1RR41";
+            neighbor 10.100.104.5 description "ROBUC2RR41";
+        }
+        group GR-IBGP-RR2 {
+            type internal;
+            tcp-mss 4096;
+            authentication-key "{{ bgp.key }}";
+            local-address {{ lo0.ip }};
+            family inet {
+                labeled-unicast {
+                    rib-group RG-REMOTE-LOOPBACKS;
+                    add-path {
+                        receive;
+                    }
+                    per-prefix-label;
+                    rib {
+                        inet.3;
+                    }
+                }
+            }
+            export PS-IBGP-RR2-EXPORT;
+            neighbor 10.100.104.2 description "ROBUC1RR42";
+            neighbor 10.100.104.4 description "ROCLU1RR42";
+            neighbor 10.100.104.6 description "ROBUC2RR42";
+        }
+    }
+}
+policy-options {
+    policy-statement PS-IBGP-RR1-EXPORT {
+        term LOCAL-LOOPBACKS {
+            from {
+                protocol direct;
+                rib inet.3;
+                route-filter 0.0.0.0/0 prefix-length-range /32-/32;
+            }
+            then {
+                next-hop self;
+                accept;
+            }
+        }
+        term OTHER-BGP {
+            from protocol bgp;
+            then {
+                next-hop self;
+                accept;
+            }
+        }
+    }
+    policy-statement PS-IBGP-RR2-EXPORT {
+        term LOCAL-LOOPBACKS {
+            from {
+                protocol direct;
+                rib inet.3;
+                route-filter 0.0.0.0/0 prefix-length-range /32-/32;
+            }
+            then {
+                next-hop self;
+                accept;
+            }
+        }
+        term OTHER-BGP {
+            from protocol bgp;
+            then {
+                next-hop self;
+                accept;
+            }
+        }
+    }
+    policy-statement PS-MY-LOCAL-LOOPBACK {
+        term LOCAL-LOOPBACKS {
+            from {
+                interface lo0.0;
+                route-filter 10.100.104.0/24 prefix-length-range /32-/32;
+            }
+            to rib inet.3;
+            then accept;
+        }
+        then reject;
+    }
+    community CM-NO-ADVERTISE members no-advertise;
+    community CM-NO-EXPORT members no-export;
+    community RT-ANY members target:*:*;
+    community RT-CPN-ALL members target:64512:*;
+    community RT-eTN-ALL members target:12302:*;
+}
+{% endif %}
+{% endif %}
+{% if 'SW' not in hostname %}
+# ------------------------------------------------------------------------------------ #
+#   Chapter 10 - MPLS AND LDP                                                          #
+# ------------------------------------------------------------------------------------ #
+protocols {
+    mpls {
+        ipv6-tunneling;
+        icmp-tunneling;
+        no-propagate-ttl;
+{% for ifd in interfaces %}{% if ifd.isis is defined or ('eTN' in ifd.remote and 'ae' in ifd.ifd) %}
+        interface {{ ifd.ifd }}{% if 'RR' not in ifd.remote %}.0{% endif %};
+{% endif %}{% endfor %}
+    }
+    ldp {
+        track-igp-metric;
+        mtu-discovery;
+        deaggregate;
+        p2mp;
+        session-protection;
+        interface lo0.0;
+        preference 20;                      ## Make it less preferred than ISIS/SR
+    {% if 'PE' in hostname %}
+        export PS-LDP-EXPORT;
+        import PS-LDP-IMPORT;
+    {% endif %}
+    {% if 'PP' not in hostname %}
+        session-group 10.100.104.0/24 {
+            authentication-key "{{ ldp.key }}";
+        }
+    {% else %}
+        {% for ifd in interfaces %}{% if ifd.isis is defined and ifd.rmt_lo0 is defined %}
+        session {{ ifd.rmt_lo0 }} {
+            authentication-key "{{ ldp.key }}";
+        }
+        {% endif %}{% endfor %}
+    {% endif %}
+{% for ifd in interfaces %}{% if ifd.isis is defined or ('eTN' in ifd.remote and 'ae' in ifd.ifd) %}
+        interface {{ ifd.ifd }}{% if 'RR' not in ifd.remote %}.0{% endif %};
+{% endif %}{% endfor %}
+    }
+}
+    {% if 'PE' in hostname %}
+policy-options {
+    policy-statement PS-LDP-EXPORT {
+        term CPN-PE-SITE {
+            from {
+                route-filter {{ lo0.ip }}/32 exact;
+                {% for ifd in interfaces %}{% if ifd.ifd=='ae0' %}
+                route-filter {{ ifd.rmt_lo0 }}/32 exact;
+                {% break %}{% endif %}{% endfor %}
+            }
+            to interface ae50.0;
+            then accept;
+        }
+        term CPN-PE-BLOCK {
+            to interface ae50.0;
+            then reject;
+        }
+        term eTN {
+            from {
+                route-filter 10.255.0.0/16 prefix-length-range /32-/32;
+            }
+        {% if site.name not in ['BUC1','BUC2','CLU1'] %}
+            to interface ae1.0;
+        {% else %}
+            to interface [ ae1.0 ae1{{ hostname[-1]|int+4 }}.41 ae1{{ hostname[-1]|int+4 }}.42 ];
+        {% endif %}
+            then reject;
+        }
+        then accept;
+    }
+    policy-statement PS-LDP-IMPORT {
+        term eTN {
+            from {
+                interface ae50.0;
+        {% for BB in eTN_BB %}
+                route-filter {{ BB.ip }}/32 exact;
+        {% endfor %}
+            }
+            then accept;
+        }
+        term eTN-BLOCK {
+            from interface ae50.0;
+            then reject;
+        }
+    }
+}
+    {% endif %}
+{% endif %}
+# ------------------------------------------------------------------------------------ #
+#   Chapter 11 - CLASS OF SERVICE                                                      #
+# ------------------------------------------------------------------------------------ #
+{% if 'PE' in hostname or 'PP' in hostname %}
+class-of-service {
+    forwarding-classes {
+        class BestEffort queue-num 0;
+        class BestEffortPlus queue-num 1;
+        class Video queue-num 2;
+        class Standard-ent queue-num 3;
+        class Enhanced-ent queue-num 4;
+        class RealTime queue-num 5;
+        class Netcontrol queue-num 6;
+        class Sync queue-num 7;
+    }
+    interfaces {
+{% for ifd in interfaces %}{% if 'RR' in ifd.remote or 'ae' not in ifd.ifd %}{% continue %}{% endif %}
+    {% if 'PE' in ifd.remote or 'PP' in ifd.remote or ('eTN' in ifd.remote and 'ae' in ifd.ifd) %}
+        {{ ifd.ifd }} {
+            scheduler-map SM-{% if 'PE' in hostname %}PE{% else %}CORE{% endif %}-COS;
+            unit 0 {
+                classifiers {
+                    dscp CL-DSCP;
+                    exp CL-EXP;
+                }
+                rewrite-rules {
+                    dscp RW-DSCP;
+                    exp RW-EXP;
+                }
+            }
+        }
+    {% elif 'SW' in ifd.remote %}{# SWITCH #}
+        {{ ifd.ifd }}  {
+            scheduler-map SM-{% if 'PE' in hostname %}PE{% else %}CORE{% endif %}-COS;
+            unit * {
+                classifiers {
+                    ieee-802.1 CL-L2;
+                }
+                rewrite-rules {
+                    ieee-802.1 RW-L2;
+                }
+            }
+        }
+    {% endif %}
+{% endfor %}
+    }
+    classifiers {
+        dscp CL-DSCP {
+            import default;
+            forwarding-class BestEffort {
+                loss-priority low code-points be;
+            }
+            forwarding-class BestEffortPlus {
+                loss-priority low code-points [ af11 af12 af13 ];
+            }
+            forwarding-class Video {
+                loss-priority low code-points [ af21 af22 af23 ];
+            }
+            forwarding-class Standard-ent {
+                loss-priority low code-points [ af31 af32 af33 ];
+            }
+            forwarding-class Enhanced-ent {
+                loss-priority low code-points [ af41 af42 af43 ];
+            }
+            forwarding-class RealTime {
+                loss-priority low code-points ef;
+            }
+            forwarding-class Netcontrol {
+                loss-priority low code-points cs6;
+            }
+            forwarding-class Sync {
+                loss-priority low code-points cs7;
+            }
+        }
+        exp CL-EXP {
+            forwarding-class BestEffort {
+                loss-priority low code-points 000;
+            }
+            forwarding-class BestEffortPlus {
+                loss-priority low code-points 001;
+            }
+            forwarding-class Video {
+                loss-priority low code-points 010;
+            }
+            forwarding-class Standard-ent {
+                loss-priority low code-points 011;
+            }
+            forwarding-class Enhanced-ent {
+                loss-priority low code-points 100;
+            }
+            forwarding-class RealTime {
+                loss-priority low code-points 101;
+            }
+            forwarding-class Netcontrol {
+                loss-priority low code-points 110;
+            }
+            forwarding-class Sync {
+                loss-priority low code-points 111;
+            }
+        }
+{% if 'PE' in hostname %}
+        ieee-802.1 CL-L2 {
+            forwarding-class BestEffort {
+                loss-priority low code-points 000;
+            }
+            forwarding-class BestEffortPlus {
+                loss-priority low code-points 001;
+            }
+            forwarding-class Video {
+                loss-priority low code-points 010;
+            }
+            forwarding-class Standard-ent {
+                loss-priority low code-points 011;
+            }
+            forwarding-class Enhanced-ent {
+                loss-priority low code-points 100;
+            }
+            forwarding-class RealTime {
+                loss-priority low code-points 101;
+            }
+            forwarding-class Netcontrol {
+                loss-priority low code-points 110;
+            }
+            forwarding-class Sync {
+                loss-priority low code-points 111;
+            }
+        }
+{% endif %}
+    }
+    host-outbound-traffic {
+        forwarding-class Netcontrol;
+        dscp-code-point 110000;
+    }
+{% if 'PE' in hostname %}
+    drop-profiles {
+        DP-MEDIUM {
+            interpolate {
+                fill-level [ 50 80 ];
+                drop-probability [ 0 100 ];
+            }
+        }
+        DP-SLOW {
+            interpolate {
+                fill-level [ 80 100 ];
+                drop-probability [ 0 100 ];
+            }
+        }
+        DP-HIGH {
+            interpolate {
+                fill-level [ 30 50 ];
+                drop-probability [ 0 100 ];
+            }
+        }
+    }
+    routing-instances {
+        all {
+            classifiers {
+                exp CL-EXP;
+            }
+        }
+    }
+{% endif %}
+    rewrite-rules {
+        dscp RW-DSCP {
+            forwarding-class BestEffort {
+                loss-priority low code-point be;
+                loss-priority high code-point be;
+            }
+            forwarding-class BestEffortPlus {
+                loss-priority low code-point af11;
+                loss-priority high code-point af11;
+            }
+            forwarding-class Video {
+                loss-priority low code-point af21;
+                loss-priority high code-point af21;
+            }
+            forwarding-class Standard-ent {
+                loss-priority low code-point af31;
+                loss-priority high code-point af31;
+            }
+            forwarding-class Enhanced-ent {
+                loss-priority low code-point af41;
+                loss-priority high code-point af41;
+            }
+            forwarding-class Netcontrol {
+                loss-priority low code-point cs6;
+                loss-priority high code-point cs6;
+            }
+            forwarding-class RealTime {
+                loss-priority low code-point ef;
+                loss-priority high code-point ef;
+            }
+            forwarding-class Sync {
+                loss-priority low code-point cs7;
+                loss-priority high code-point cs7;
+            }
+        }
+        exp RW-EXP {
+            forwarding-class BestEffort {
+                loss-priority high code-point 000;
+                loss-priority low code-point 000;
+            }
+            forwarding-class BestEffortPlus {
+                loss-priority high code-point 001;
+                loss-priority low code-point 001;
+            }
+            forwarding-class Video {
+                loss-priority low code-point 010;
+                loss-priority high code-point 010;
+            }
+            forwarding-class Standard-ent {
+                loss-priority low code-point 011;
+                loss-priority high code-point 011;
+            }
+            forwarding-class Enhanced-ent {
+                loss-priority low code-point 100;
+                loss-priority high code-point 100;
+            }
+            forwarding-class RealTime {
+                loss-priority low code-point 101;
+                loss-priority high code-point 101;
+            }
+            forwarding-class Netcontrol {
+                loss-priority low code-point 110;
+                loss-priority high code-point 110;
+            }
+            forwarding-class Sync {
+                loss-priority low code-point 111;
+                loss-priority high code-point 111;
+            }
+        }
+{% if 'PE' in hostname %}
+        ieee-802.1 RW-L2 {
+            forwarding-class BestEffort {
+                loss-priority high code-point 000;
+                loss-priority low code-point 000;
+            }
+            forwarding-class BestEffortPlus {
+                loss-priority high code-point 001;
+                loss-priority low code-point 001;
+            }
+            forwarding-class Video {
+                loss-priority low code-point 010;
+                loss-priority high code-point 010;
+            }
+            forwarding-class Standard-ent {
+                loss-priority low code-point 011;
+                loss-priority high code-point 011;
+            }
+            forwarding-class Enhanced-ent {
+                loss-priority low code-point 100;
+                loss-priority high code-point 100;
+            }
+            forwarding-class RealTime {
+                loss-priority low code-point 101;
+                loss-priority high code-point 101;
+            }
+            forwarding-class Netcontrol {
+                loss-priority low code-point 110;
+                loss-priority high code-point 110;
+            }
+            forwarding-class Sync {
+                loss-priority low code-point 111;
+                loss-priority high code-point 111;
+            }
+        }
+{% endif %}
+    }
+    scheduler-maps {
+        SM-{% if 'PE' in hostname %}PE{% else %}CORE{% endif %}-COS {
+            forwarding-class BestEffort scheduler SC-BestEffort;
+            forwarding-class BestEffortPlus scheduler SC-BestEffortPlus;
+            forwarding-class Video scheduler SC-Video;
+            forwarding-class Standard-ent scheduler SC-Standard-ent;
+            forwarding-class Enhanced-ent scheduler SC-Enhanced-ent;
+            forwarding-class RealTime scheduler SC-RealTime;
+            forwarding-class Netcontrol scheduler SC-Netcontrol;
+            forwarding-class Sync scheduler SC-Sync;
+        }
+    }
+    schedulers {
+        SC-BestEffort {
+            transmit-rate percent 5;
+            priority low;
+        }
+        SC-BestEffortPlus {
+            transmit-rate percent 10;
+            priority medium-high;
+        }
+        SC-Video {
+            transmit-rate percent 15;
+            priority medium-low;
+        }
+        SC-Standard-ent {
+            transmit-rate percent 25;
+            priority medium-low;
+{% if 'PE' in hostname %}
+            drop-profile-map loss-priority any protocol any drop-profile DP-MEDIUM;
+{% endif %}
+       }
+        SC-Enhanced-ent {
+            transmit-rate percent 15;
+            priority medium-high;
+{% if 'PE' in hostname %}
+            drop-profile-map loss-priority any protocol any drop-profile DP-MEDIUM;
+{% endif %}
+        }
+        SC-RealTime {
+            transmit-rate percent 20;
+            priority high;
+        }
+        SC-Netcontrol {
+            transmit-rate percent 5;
+            priority high;
+        }
+        SC-Sync {
+            transmit-rate percent 5;
+            priority high;
+        }
+    }
+}
+{% elif 'SW' in hostname %}{# SWITCH #}
+class-of-service {
+    forwarding-classes {
+        class BestEffort queue-num 0;
+        class BestEffortPlus queue-num 1;
+        class Video queue-num 2;
+        class Standard-ent queue-num 3;
+        class Enhanced-ent queue-num 4;
+        class RealTime queue-num 5;
+        class Netcontrol queue-num 6;
+        class Sync queue-num 7; 
+        class mcast queue-num 8;        
+    }
+    interfaces {
+        ae1 {     ### Uplink interface
+            forwarding-class-set {
+                PG-LOW {
+                    output-traffic-control-profile TP-LOW;
+                }
+                PG-HIGH {
+                    output-traffic-control-profile TP-HIGH;
+                }
+                PG-MCAST {
+                    output-traffic-control-profile TP-MCAST;
+                }
+            }
+            unit 0 {
+                classifiers {
+                    ieee-802.1 CL-L2;
+                }
+                rewrite-rules {
+                    ieee-802.1 RW-L2;
+                }
+            }
+        }        
+    }
+    classifiers {
+        dscp CL-DSCP {
+            import default;
+            forwarding-class BestEffort {
+                loss-priority low code-points be;
+            }
+            forwarding-class BestEffortPlus {
+                loss-priority low code-points [ af11 af12 af13 ];
+            }
+            forwarding-class Video {
+                loss-priority low code-points [ af21 af22 af23 ];
+            }
+            forwarding-class Standard-ent {
+                loss-priority low code-points [ af31 af32 af33 ];
+            }
+            forwarding-class Enhanced-ent {
+                loss-priority low code-points [ af41 af42 af43 ];
+            }
+            forwarding-class RealTime {
+                loss-priority low code-points ef;
+            }
+            forwarding-class Netcontrol {
+                loss-priority low code-points cs6;
+            }
+            forwarding-class Sync {
+                loss-priority low code-points cs7;
+            }
+        }
+        dscp CL-DSCP-MD {
+            forwarding-class mcast {
+                loss-priority low code-points [ 000000 001000 010000 011000 000001 000010 000011 000100 000101 000110 000111 001001 001010 001011 001100 001101 001110 001111 010001 010010 010011 010100 010101 010110 010111 011001 011010 011011 011100 011101 011110 011111 100000 100001 100010 100011 100100 100101 100110 100111 101000 101001 101010 101011 101100 101101 101110 101111 110000 110001 110010 110011 110100 110101 110110 110111 111000 111001 111010 111011 111100 111101 111110 111111 ];
+            }
+        }
+        ieee-802.1 CL-L2 {
+            forwarding-class BestEffort {
+                loss-priority low code-points 000;
+            }
+            forwarding-class BestEffortPlus {
+                loss-priority low code-points 001;
+            }
+            forwarding-class Video {
+                loss-priority low code-points 010;
+            }
+            forwarding-class Standard-ent {
+                loss-priority low code-points 011;
+            }                           
+            forwarding-class Enhanced-ent {
+                loss-priority low code-points 100;
+            }
+            forwarding-class RealTime {
+                loss-priority low code-points 101;
+            }
+            forwarding-class Netcontrol {
+                loss-priority low code-points 110;
+            }
+            forwarding-class Sync {
+                loss-priority low code-points 111;
+            }
+        }
+    }
+    shared-buffer {
+        ingress {
+            percent 100;
+            buffer-partition lossless {
+                percent 5;
+            }
+            buffer-partition lossless-headroom {
+                percent 0;
+            }
+            buffer-partition lossy {
+                percent 95;
+            }
+        }
+        egress {
+            percent 100;
+            buffer-partition lossless {
+                percent 5;
+            }
+            buffer-partition lossy {
+                percent 75;
+            }
+            buffer-partition multicast {
+                percent 20;
+            }
+        }
+    }
+    traffic-control-profiles {
+        TP-LOW {
+            scheduler-map SM-LOW;
+            guaranteed-rate percent 65;
+        }
+        TP-HIGH {
+            scheduler-map SM-HIGH;
+            shaping-rate percent 25;
+        }
+        TP-MCAST {
+            scheduler-map SM-MCAST;
+            guaranteed-rate percent 10;
+        }
+    }
+    forwarding-class-sets {
+        PG-LOW {
+            class BestEffort;
+            class BestEffortPlus;
+            class Video;
+            class Standard-ent;
+            class Enhanced-ent;
+            class RealTime;
+        }
+        PG-HIGH {
+            class Netcontrol;
+            class Sync;
+        }
+        PG-MCAST {
+            class mcast;
+        }
+    }
+    rewrite-rules {
+        ieee-802.1 RW-L2 {
+            forwarding-class BestEffort {
+                loss-priority high code-point 000;
+                loss-priority low code-point 000;
+            }
+            forwarding-class BestEffortPlus {
+                loss-priority high code-point 001;
+                loss-priority low code-point 001;
+            }
+            forwarding-class Video {
+                loss-priority low code-point 010;
+                loss-priority high code-point 010;
+            }
+            forwarding-class Standard-ent {
+                loss-priority low code-point 011;
+                loss-priority high code-point 011;
+            }
+            forwarding-class Enhanced-ent {
+                loss-priority low code-point 100;
+                loss-priority high code-point 100;
+            }
+            forwarding-class RealTime {
+                loss-priority low code-point 101;
+                loss-priority high code-point 101;
+            }
+            forwarding-class Netcontrol {
+                loss-priority low code-point 110;
+                loss-priority high code-point 110;
+            }
+            forwarding-class Sync {
+                loss-priority low code-point 111;
+                loss-priority high code-point 111;
+            }
+        }
+    }
+    scheduler-maps {
+        SM-LOW {
+            forwarding-class BestEffort scheduler SC-BestEffort;
+            forwarding-class BestEffortPlus scheduler SC-BestEffortPlus;
+            forwarding-class Video scheduler SC-Video;
+            forwarding-class Standard-ent scheduler SC-Standard-ent;
+            forwarding-class Enhanced-ent scheduler SC-Enhanced-ent;
+            forwarding-class RealTime scheduler SC-RealTime;
+        }
+        SM-HIGH {
+            forwarding-class Netcontrol scheduler SC-Netcontrol;
+            forwarding-class Sync scheduler SC-Sync;
+        }
+        SM-MCAST {
+            forwarding-class mcast scheduler SC-mcast;
+        }
+    }
+    schedulers {
+        SC-BestEffort {
+            transmit-rate percent 10;
+            buffer-size percent 5;
+            priority low;
+        }
+        SC-BestEffortPlus {
+            transmit-rate percent 15;
+            buffer-size percent 10;
+            priority low;
+        }
+        SC-Video {
+            transmit-rate percent 15;
+            buffer-size percent 10;
+            priority low;
+        }
+        SC-Standard-ent {
+            transmit-rate percent 25;
+            buffer-size percent 15;
+            priority low;
+        }
+        SC-Enhanced-ent {
+            transmit-rate percent 20;   
+            buffer-size percent 15;
+            priority low;
+        }
+        SC-RealTime {
+            transmit-rate percent 15;
+            buffer-size percent 10;
+            priority low;
+        }
+        SC-Netcontrol {
+            shaping-rate percent 5;
+            buffer-size percent 5;
+            priority strict-high;
+        }
+        SC-Sync {
+            shaping-rate percent 95;
+            buffer-size percent 20;
+            priority strict-high;
+        }
+        SC-mcast {
+            transmit-rate percent 100;
+            buffer-size percent 10;
+            priority low;
+        }
+    }
+    multi-destination {
+        classifiers {
+            dscp CL-DSCP-MD;
+        }
+    }
+}
+{% endif %}
+
+# ------------------------------------------------------------------------------------ #
+#   Chapter 15 - CONTROL PLANE PROTECTION                                              #
+# ------------------------------------------------------------------------------------ #
+{% if 'PP' in hostname %}
+groups {
+    re0 {
+        interfaces {
+            re0:mgmt-0 {
+                unit 0 {
+                    family inet {
+                        filter {
+                            inactive: input FF-RE-MGMT-V4;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    re1 {
+        interfaces {
+            re1:mgmt-0 {
+                unit 0 {
+                    family inet {
+                        filter {
+                            inactive: input FF-RE-MGMT-V4;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+{% endif %}
+{% if 'SW' in hostname %}
+interfaces {
+    vme {
+        unit 0 {
+            family inet {
+                filter {
+                    inactive: input FF-RE-MGMT-V4;
+                }
+            }
+        }
+    }
+}
+{% endif %}
+{% if 'PE' in hostname or 'PP' in hostname %}
+groups {
+    GR-FF-RE-PROTECT {
+        interfaces {
+            <lo*> {
+                unit 0 {
+                    family inet {
+                        filter {
+                            input FF-RE-PROTECT-V4;
+                            output FF-COS-RE-FILTER;
+                        }
+                    }
+                    family inet6 {
+                        filter {
+                            input FF-RE-VRF-V6;
+                        }
+                    }
+                }
+                unit "<*[1-9]*>" {
+                    family inet {
+                        filter {
+                            input FF-RE-VRF-V4;
+                        }
+                    }
+                    family inet6 {
+                        filter {
+                            input FF-RE-VRF-V6;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+{% elif 'RR' in hostname %}
+groups {
+    GR-FF-RE-PROTECT {
+        interfaces {
+            <lo*> {
+                unit 0 {
+                    family inet {
+                        filter {
+                            input FF-RE-PROTECT-V4;
+                            output FF-COS-RE-FILTER;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}   
+{% endif %}
+
+{% if 'SW' in hostname %}
+interfaces {
+     lo0 {
+        unit 0 {
+            family inet {
+                filter {
+                    inactive: input FF-RE-PROTECT-V4;
+                }
+            }
+        }
+    }
+}
+{% endif %}
+{% if 'PE' in hostname %}
+firewall {
+    family inet {
+        filter FF-COS-RE-FILTER {
+            term TR-TCP-BASED {
+                from {
+                    protocol tcp;
+                    port [ tacacs ];
+                }
+                then {
+                    forwarding-class BestEffort;
+                    accept;
+                }
+            }
+            term TR-UDP-BASED {
+                from {
+                    protocol udp;
+                    port [ snmp snmptrap syslog ];
+                }
+                then {
+                    forwarding-class BestEffort;
+                    accept;
+                }
+            }
+            term TR-ICMP {
+                from {
+                    protocol icmp;
+                }
+                then {
+                    forwarding-class BestEffort;
+                    accept;
+                }
+            }
+            term TR-DEFAULT {
+                then accept;
+            }
+        }   
+        filter FF-RE-PROTECT-V4 {
+            interface-specific;
+            term TR-FIRST-FRAG-DROP {
+                from {
+                    fragment-offset 0;
+                    fragment-flags more-fragments;
+                }
+                then {
+                    count CNT-FIRST-FRAG-DROP;
+                    discard;
+                }
+            }
+            term TR-NEXT-FRAG-DROP {
+                from {
+                    fragment-offset-except 0;
+                }
+                then {
+                    count CNT-NEXT-FRAG-DROP;
+                    discard;
+                }
+            }
+            term TR-TCP-DOS-PREVENTION-DSC {
+                from {
+                    source-prefix-list {
+                        PL-DEFAULT-V4;
+                        PL-bgp-peers except;
+                        PL-bgp-peers-vrfs except;
+                        PL-LOOPBACKS except;
+                        PL-ssh-list except;
+                        PL-tacacs-servers except;
+                        PL-LDP-LIST except;
+                    }
+                    protocol tcp;
+                    tcp-flags "(syn & !ack) | fin | rst";
+                }
+                then {
+                    count CNT-TCP-DOS-DSC;
+                    discard;
+                }
+            }
+            term TR-TCP-DOS-PREVENTION-ok {
+                from {
+                    protocol tcp;
+                    tcp-flags "(syn & !ack) | fin | rst";
+                }
+                then {
+                    policer PC-TCP-DOS;
+                    count CNT-TCP-DOS-ok;
+                    next term;
+                }
+            }
+            term TR-SSH-ok {
+                from {
+                    source-prefix-list {
+                        PL-ssh-list;
+                    }
+                    protocol tcp;
+                    port ssh;
+                }
+                then {
+                    count CNT-SSH-ok;
+                    accept;
+                }
+            }
+            term TR-NETCONF-ok {
+                from {
+                    source-prefix-list {
+                        PL-netconf-list;
+                    }
+                    protocol tcp;
+                    destination-port 830;
+                }
+                then {
+                    policer PC-netconf;
+                    count CNT-NETCONF-ok;
+                    accept;
+                }
+            }
+            term TR-TACACS-ok {
+                from {
+                    source-prefix-list {
+                        PL-tacacs-servers;
+                    }
+                    protocol tcp;
+                    port tacacs;
+                }
+                then {
+                    policer PC-tacacs;
+                    count CNT-TACACS-ok;
+                    accept;
+                }
+            }
+            term TR-OSPF-ok {
+                from {
+                    source-prefix-list {
+                        PL-DIRECT-v4;
+                        PL-LOOPBACKS;
+                    }
+                    protocol ospf;
+                }
+                then {
+                    count CNT-OSPF-ok;
+                    accept;
+                }
+            }
+            term TR-BGP-ok {
+                from {
+                    source-prefix-list {
+                        PL-bgp-peers;
+                        PL-bgp-peers-vrfs;
+                    }
+                    protocol tcp;
+                    port bgp;
+                }
+                then {
+                    count CNT-BGP-ok;
+                    accept;
+                }
+            }
+            term TR-BFD-ok {
+                from {
+                    protocol udp;
+                    port [ 6784 3784 3785 4784 7784 ];
+                }
+                then {
+                    count CNT-BFD-ok;
+                    accept;
+                }
+            }
+            term TR-LDP-ok {
+                from {
+                    source-prefix-list {
+                        PL-LDP-LIST;
+                    }
+                    protocol [ tcp udp ];
+                    port 646;
+                }
+                then {
+                    count CNT-LDP-ok;
+                    accept;
+                }
+            }
+            term TR-LSPPING-ok {
+                from {
+                    source-prefix-list {
+                        PL-LOOPBACKS;
+                    }
+                    protocol udp;
+                    port 3503;
+                }
+                then {
+                    count CNT-LSPPING-ok;
+                    accept;
+                }
+            }
+            term TR-VRRP-ok {
+                from {
+                    destination-prefix-list {
+                        vrrp;
+                    }
+                    protocol [ ah vrrp ];
+                }
+                then {
+                    policer PC-vrrp;
+                    count CNT-VRRP-ok;
+                    accept;
+                }
+            }
+            term TR-SNMP-tcp-ok {
+                from {
+                    source-prefix-list {
+                        PL-snmpv3-list-tcp;
+                    }
+                    protocol tcp;
+                    destination-port snmp;
+                }
+                then {
+                    policer PC-snmp-tcp;
+                    count CNT-SNMP-tcp-ok;
+                    accept;
+                }
+            }
+            term TR-SNMP-udp-ok {
+                from {
+                    source-prefix-list {
+                        PL-snmpv2-community-clients;
+                        PL-snmpv3-list-udp;
+                    }
+                    protocol udp;
+                    destination-port snmp;
+                }
+                then {
+                    policer PC-snmp-udp;
+                    count CNT-SNMP-udp-ok;
+                    accept;
+                }
+            }
+            term TR-NTP-ok {
+                from {
+                    source-prefix-list {
+                        PL-NTP-SERVERS;
+                        PL-NTP-SOURCE;
+                    }
+                    protocol udp;
+                    port ntp;
+                }
+                then {
+                    policer PC-ntp;
+                    count CNT-NTP-ok;
+                    accept;
+                }
+            }
+            term TR-DNS-ok {
+                from {
+                    source-prefix-list {
+                        name-servers;
+                    }
+                    protocol udp;
+                    port domain;
+                }
+                then {
+                    policer PC-dns;
+                    count CNT-DNS-ok;
+                    accept;
+                }
+            }
+            term DHCP-ACC {
+                from {
+                    protocol udp;
+                    port [ bootps 67 68 ];
+                }
+                then {
+                    policer PC-DHCP;
+                    count CNT-DHCP-ACC;
+                    accept;
+                }
+            }
+            term TR-PIM {
+                from {
+                    protocol pim;
+                }
+                then {
+                    policer PC-pim;
+                    count CNT-PIM;
+                    accept;
+                }
+            }
+            term TR-IGMP {
+                from {
+                    protocol igmp;
+                }
+                then {
+                    policer PC-igmp;
+                    count CNT-IGMP;
+                    accept;
+                }
+            }
+            term TR-MTRACE {
+                from {
+                    destination-address {
+                        224.0.0.0/3;
+                    }
+                }
+                then {
+                    policer PC-mtrace;
+                    count CNT-MTRACE;
+                    accept;
+                }
+            }
+            term TR-ICMP-POLICE-ok {
+                from {
+                    protocol icmp;
+                    icmp-type [ echo-request echo-reply unreachable time-exceeded parameter-problem ];
+                }
+                then {
+                    policer PC-icmp;
+                    count CNT-ICMP-POLICE;
+                    accept;
+                }
+            }
+            term TR-TRACEROUTE-ok {
+                from {
+                    protocol udp;
+                    destination-port 33434-33523;
+                }
+                then {
+                    policer PC-traceroutes;
+                    count CNT-TRACEROUTE-ok;
+                    accept;
+                }
+            }
+            term TR-ALL-DISCARD {
+                then {
+                    count CNT-FF-RE-DISCARD;
+                    discard;
+                }
+            }
+        }
+        filter FF-RE-VRF-V4 {
+            interface-specific;
+            term TR-FIRST-FRAG-DROP {
+                from {
+                    fragment-offset 0;
+                    fragment-flags more-fragments;
+                }
+                then {
+                    count CNT-FIRST-FRAG-DROP;
+                    discard;
+                }
+            }
+            term TR-NEXT-FRAG-DROP {
+                from {
+                    fragment-offset-except 0;
+                }
+                then {
+                    count CNT-NEXT-FRAG-DROP;
+                    discard;
+                }
+            }
+            term TR-TCP-DOS-PREVENTION-DSC {
+                from {
+                    source-prefix-list {
+                        PL-DEFAULT-V4;
+                        PL-bgp-peers except;
+                        PL-bgp-peers-vrfs except;
+                    }
+                    protocol tcp;
+                    tcp-flags "(syn & !ack) | fin | rst";
+                }
+                then {
+                    count CNT-RE-TCP-DOS-DSC;
+                    discard;
+                }
+            }
+            term TR-TCP-DOS-PREVENTION-ACC {
+                from {
+                    protocol tcp;
+                    tcp-flags "(syn & !ack) | fin | rst";
+                }
+                then {
+                    policer PC-TCP-DOS;
+                    count CNT-TCP-DOS-ACC;
+                    next term;
+                }
+            }
+            term TR-ICMP-POLICE-ok {
+                from {
+                    protocol icmp;
+                    icmp-type [ echo-request echo-reply unreachable time-exceeded parameter-problem ];
+                }
+                then {
+                    policer PC-icmp;
+                    count CNT-ICMP-POLICE;
+                    accept;
+                }
+            }
+            term TR-TRACEROUTE-ok {
+                from {
+                    protocol udp;
+                    destination-port 33434-33523;
+                }
+                then {
+                    policer PC-traceroutes;
+                    count CNT-TRACEROUTE-ACC;
+                    accept;
+                }
+            }
+            term TR-VRRP-ok {
+                from {
+                    destination-prefix-list {
+                        vrrp;
+                    }
+                    protocol [ ah vrrp ];
+                }
+                then {
+                    policer PC-vrrp;
+                    count CNT-VRRP;
+                    accept;
+                }
+            }
+            term TR-BFD-ok {
+                from {
+                    protocol udp;
+                    port [ 6784 3784 3785 4784 7784 ];
+                }
+                then {
+                    count CNT-BFD-ok;
+                    accept;
+                }
+            }
+            term TR-PIM {
+                from {
+                    protocol pim;
+                }
+                then {
+                    policer PC-pim;
+                    count CNT-PIM;
+                    accept;
+                }
+            }
+            term TR-IGMP {
+                from {
+                    protocol igmp;
+                }
+                then {
+                    policer PC-igmp;
+                    count CNT-IGMP;
+                    accept;
+                }
+            }
+            term TR-MTRACE {
+                from {
+                    destination-address {
+                        224.0.0.0/3;
+                    }
+                }
+                then {
+                    policer PC-mtrace;
+                    count CNT-MTRACE;
+                    accept;
+                }
+            }
+            term DHCP-ACC {
+                from {
+                    protocol udp;
+                    port [ bootps 67 68 ];
+                }
+                then {
+                    policer PC-DHCP;
+                    count CNT-DHCP-ACC;
+                    accept;
+                }
+            }
+            term TR-OSPF-ok {
+                from {
+                    source-prefix-list {
+                        PL-DIRECT-v4;
+                    }
+                    protocol ospf;
+                    ttl 1;
+                }
+                then {
+                    count CNT-OSPF-VRF-ok;
+                    accept;
+                }
+            }
+            term TR-BGP-ok {
+                from {
+                    source-prefix-list {
+                        PL-bgp-peers-vrfs;
+                    }
+                    protocol tcp;
+                    port bgp;
+                }
+                then {
+                    count CNT-BGP-VRF-ok;
+                    accept;
+                }
+            }
+            term TR-ALL-DSC {
+                then {
+                    count CNT-FF-RE-DSC;
+                    discard;
+                }
+            }
+        }       
+    }
+    family inet6 {
+        filter FF-RE-VRF-V6 {
+            interface-specific;
+            term TR-DISCARD-EXTENSION-HEADERS {
+                from {
+                    next-header [ dstopts egp esp fragment gre icmp igmp ipip ipv6 no-next-header routing rsvp sctp ah ];
+                }
+                then {
+                    count CNT-v6-DISCARD-EXTENSION-HEADERS;
+                    discard;
+                }
+            }
+            term TCP-INVALID-DSC {
+                from {
+                    next-header tcp;
+                    payload-protocol tcp;
+                    tcp-flags "syn & fin";
+                }
+                then {
+                    count CNT-TCP-INVALID-DSC;
+                    discard;
+                }
+            }
+            term TR-BGP-ok {
+                from {
+                    source-prefix-list {
+                        PL-bgp-peers-vrfs-v6;
+                    }
+                    payload-protocol tcp;
+                    port bgp;
+                }
+                then {
+                    count CNT-v6-BGP-ok;
+                    accept;
+                }
+            }
+            term TR-BFD-ok {
+                from {
+                    payload-protocol udp;
+                    port [ 6784 3784 3785 4784 7784 ];
+                }
+                then {
+                    count CNT-BFD-ok;
+                    accept;
+                }
+            }
+            term TR-TRACEROUTES-ok {
+                from {
+                    payload-protocol udp;
+                    destination-port 33435-33450;
+                }
+                then {
+                    policer PC-traceroutes;
+                    count CNT-v6-TRACEROUTES-ok;
+                    accept;
+                }
+            }
+            term TR-DAD-REQUEST-ok {
+                from {
+                    source-address {
+                        ::/128;
+                    }
+                    destination-address {
+                        ff02:0:0:0:0:1:ff00::/104;
+                    }
+                }
+                then {
+                    count CNT-v6-DAD-REQUEST-ok;
+                    accept;
+                }
+            }
+            term TR-DAD-REPLY-ok {
+                from {
+                    source-address {
+                        ff02::1/128;
+                    }
+                    destination-address {
+                        fe80::/64;
+                    }
+                }
+                then {
+                    count CNT-RE-v6-DAD-REPLY-ok;
+                    accept;
+                }
+            }
+            term TR-LOCAL-ok {
+                from {
+                    source-address {
+                        fe80::/64;
+                        ff02:0:0:0:0:1:ff00::/104;
+                        ff02:0:0:0:0:0:0:2/128;
+                        ff02:0:0:0:0:0:0:1/128;
+                    }
+                    destination-address {
+                        fe80::/64;
+                        ff02:0:0:0:0:1:ff00::/104;
+                        ff02:0:0:0:0:0:0:2/128;
+                        ff02:0:0:0:0:0:0:1/128;
+                    }
+                }
+                then {
+                    count CNT-RE-v6-LOCAL-ok;
+                    accept;
+                }
+            }
+            term TR-ND-ok {
+                from {
+                    source-prefix-list {
+                        PL-DIRECT-V6;
+                    }
+                    payload-protocol icmpv6;
+                    icmp-type [ router-solicit router-advertisement neighbor-solicit neighbor-advertisement inverse-neighbor-discovery-advertisement inverse-neighbor-discovery-solicitation ];
+                    hop-limit 255;
+                }
+                then {
+                    count CNT-RE-v6-ND-ok;
+                    accept;
+                }
+            }
+            term TR-ICMP-POLICE-ok {
+                from {
+                    payload-protocol icmpv6;
+                    icmp-type [ echo-request echo-reply destination-unreachable time-exceeded packet-too-big parameter-problem ];
+                }
+                then {
+                    policer PC-icmp;
+                    count CNT-RE-v6-ICMP-PLC-ok;
+                    accept;
+                }
+            }
+            term TR-VRRP-CUST-ok {                
+                from {
+                    payload-protocol [ vrrp ah ];
+                }
+                then {
+                    count CNT-RE-v6-VRRP-CUST-ok;
+                    accept;
+                }
+            }          
+            term TR-DISCARD-UNDEFINED {
+                then {
+                    count CNT-v6-DISCARD-UNDEFINED;
+                    discard;
+                }
+            }
+        }
+    }
+    policer PC-TCP-DOS {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-dns {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-DHCP {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-icmp {
+        if-exceeding {
+            bandwidth-limit 10m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-igmp {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-mtrace {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-netconf {
+        if-exceeding {
+            bandwidth-limit 10m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-ntp {
+        if-exceeding {
+            bandwidth-limit 500k;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-pim {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-snmp-tcp {
+        if-exceeding {
+            bandwidth-limit 5m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-snmp-udp {
+        if-exceeding {
+            bandwidth-limit 5m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-ssh {
+        if-exceeding {
+            bandwidth-limit 50m;
+            burst-size-limit 100k;
+        }
+        then discard;
+    }
+    policer PC-tacacs {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-traceroutes {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-vrrp {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+}
+{% elif 'PP' in hostname %}
+firewall {
+    family inet {
+        filter FF-COS-RE-FILTER {
+            term TR-TCP-BASED {
+                from {
+                    protocol tcp;
+                    port [ tacacs ];
+                }
+                then {
+                    forwarding-class BestEffort;
+                    accept;
+                }
+            }
+            term TR-UDP-BASED {
+                from {
+                    protocol udp;
+                    port [ snmp snmptrap syslog ];
+                }
+                then {
+                    forwarding-class BestEffort;
+                    accept;
+                }
+            }
+            term TR-ICMP {
+                from {
+                    protocol icmp;
+                }
+                then {
+                    forwarding-class BestEffort;
+                    accept;
+                }
+            }
+            term TR-DEFAULT {
+                then accept;
+            }
+        }   
+        filter FF-RE-MGMT-V4 {
+            interface-specific;
+            term TR-SSH-ok {
+                from {
+                    source-prefix-list {
+                        PL-ssh-list;
+                    }
+                    protocol tcp;
+                    port ssh;
+                }
+                then {
+                    policer PC-ssh;
+                    count CNT-SSH-ok;
+                    accept;
+                }
+            }
+            term TR-NETCONF-ok {
+                from {
+                    source-prefix-list {
+                        PL-netconf-list;
+                    }
+                    protocol tcp;
+                    destination-port 830;
+                }
+                then {
+                    policer PC-netconf;
+                    count CNT-NETCONF-ok;
+                    accept;
+                }
+            }
+            term TR-TACACS-ok {
+                from {
+                    source-prefix-list {
+                        PL-tacacs-servers;
+                    }
+                    protocol tcp;
+                    port tacacs;
+                }
+                then {
+                    policer PC-tacacs;
+                    count CNT-TACACS-ok;
+                    accept;
+                }
+            }
+            term TR-SNMP-udp-ok {
+                from {
+                    source-prefix-list {
+                        PL-snmpv2-community-clients;
+                        PL-snmpv3-list-udp;
+                    }
+                    protocol udp;
+                    destination-port snmp;
+                }
+                then {
+                    policer PC-snmp-udp;
+                    count CNT-SNMP-udp-ok;
+                    accept;
+                }
+            }
+            term TR-DNS-ok {
+                from {
+                    source-prefix-list {
+                        name-servers;
+                    }
+                    protocol udp;
+                    port domain;
+                }
+                then {
+                    policer PC-dns;
+                    count CNT-DNS-ok;
+                    accept;
+                }
+            }
+            term TR-ICMP-POLICE-ok {
+                from {
+                    protocol icmp;
+                    icmp-type [ echo-request echo-reply unreachable time-exceeded parameter-problem ];
+                }
+                then {
+                    policer PC-icmp;
+                    count CNT-ICMP-POLICE;
+                    accept;
+                }
+            }
+            term TR-TRACEROUTE-ok {
+                from {
+                    protocol udp;
+                    destination-port 33434-33523;
+                }
+                then {
+                    policer PC-traceroutes;
+                    count CNT-TRACEROUTE-ok;
+                    accept;
+                }
+            }
+            term TR-DISCARD-UNDEFINED {
+                then {
+                    count CNT-DISCARD-UNDEFINED;
+                    discard;
+                }
+            }
+        }
+        filter FF-RE-PROTECT-V4 {
+            interface-specific;
+            term TR-FIRST-FRAG-DROP {
+                from {
+                    fragment-offset 0;
+                    fragment-flags more-fragments;
+                }
+                then {
+                    count CNT-FIRST-FRAG-DROP;
+                    discard;
+                }
+            }
+            term TR-NEXT-FRAG-DROP {
+                from {
+                    fragment-offset-except 0;
+                }
+                then {
+                    count CNT-NEXT-FRAG-DROP;
+                    discard;
+                }
+            }
+            term TR-TCP-DOS-PREVENTION-DSC {
+                from {
+                    source-prefix-list {
+                        PL-DEFAULT-V4;
+                        PL-bgp-peers except;
+                        PL-bgp-peers-vrfs except;
+                        PL-LOOPBACKS except;
+                        PL-ssh-list except;
+                        PL-tacacs-servers except;
+                        PL-LDP-LIST except;
+                    }
+                    protocol tcp;
+                    tcp-flags "(syn & !ack) | fin | rst";
+                }
+                then {
+                    count CNT-TCP-DOS-DSC;
+                    discard;
+                }
+            }
+            term TR-TCP-DOS-PREVENTION-ACC {
+                from {
+                    protocol tcp;
+                    tcp-flags "(syn & !ack) | fin | rst";
+                }
+                then {
+                    policer PC-TCP-DOS;
+                    count CNT-TCP-DOS-ACC;
+                    next term;
+                }
+            }
+            term TR-SSH-ok {
+                from {
+                    source-prefix-list {
+                        PL-ssh-list;
+                    }
+                    protocol tcp;
+                    port ssh;
+                }
+                then {
+                    policer PC-ssh;
+                    count CNT-SSH-ok;
+                    accept;
+                }
+            }
+            term TR-NETCONF-ok {
+                from {
+                    source-prefix-list {
+                        PL-netconf-list;
+                    }
+                    protocol tcp;
+                    destination-port 830;
+                }
+                then {
+                    policer PC-netconf;
+                    count CNT-NETCONF-ok;
+                    accept;
+                }
+            }
+            term TR-TACACS-ok {
+                from {
+                    source-prefix-list {
+                        PL-tacacs-servers;
+                    }
+                    protocol tcp;
+                    port tacacs;
+                }
+                then {
+                    policer PC-tacacs;
+                    count CNT-TACACS-ok;
+                    accept;
+                }
+            }
+            term TR-BGP-ok {
+                from {
+                    source-prefix-list {
+                        PL-bgp-peers;
+                        PL-bgp-peers-vrfs;
+                    }
+                    protocol tcp;
+                    port bgp;
+                }
+                then {
+                    count CNT-BGP-ok;
+                    accept;
+                }
+            }
+            term TR-BFD-ok {
+                from {
+                    protocol udp;
+                    port [ 6784 3784 3785 4784 7784 ];
+                }
+                then {
+                    count CNT-BFD-ok;
+                    accept;
+                }
+            }
+            term TR-LDP-ok {
+                from {
+                    source-prefix-list {
+                        PL-LDP-LIST;
+                    }
+                    protocol [ tcp udp ];
+                    port 646;
+                }
+                then {
+                    count CNT-LDP-ok;
+                    accept;
+                }
+            }
+            term TR-LSPPING-ok {
+                from {
+                    source-prefix-list {
+                        PL-LOOPBACKS;
+                    }
+                    protocol udp;
+                    port 3503;
+                }
+                then {
+                    count LSPPING-ok;
+                    accept;
+                }
+            }
+            term TR-VRRP {
+                from {
+                    destination-prefix-list {
+                        vrrp;
+                    }
+                    protocol [ ah vrrp ];
+                }
+                then {
+                    policer PC-vrrp;
+                    count CNT-VRRP;
+                    accept;
+                }
+            }
+            term TR-SNMP-tcp-ok {
+                from {
+                    source-prefix-list {
+                        PL-snmpv3-list-tcp;
+                    }
+                    protocol tcp;
+                    destination-port snmp;
+                }
+                then {
+                    policer PC-snmp-tcp;
+                    count CNT-SNMP-tcp-ok;
+                    accept;
+                }
+            }
+            term TR-SNMP-udp-ok {
+                from {
+                    source-prefix-list {
+                        PL-snmpv2-community-clients;
+                        PL-snmpv3-list-udp;
+                    }
+                    protocol udp;
+                    destination-port snmp;
+                }
+                then {
+                    policer PC-snmp-udp;
+                    count CNT-SNMP-udp-ok;
+                    accept;
+                }
+            }
+            term TR-NTP-ok {
+                from {
+                    source-prefix-list {
+                        PL-NTP-SERVERS;
+                        PL-NTP-SOURCE;
+                    }
+                    protocol udp;
+                    port ntp;
+                }
+                then {
+                    policer PC-ntp;
+                    count CNT-NTP-ok;
+                    accept;
+                }
+            }
+            term TR-DNS-ok {
+                from {
+                    source-prefix-list {
+                        name-servers;
+                    }
+                    protocol udp;
+                    port domain;
+                }
+                then {
+                    policer PC-dns;
+                    count CNT-DNS-ok;
+                    accept;
+                }
+            }
+            term TR-PIM {
+                from {
+                    protocol pim;
+                }
+                then {
+                    policer PC-pim;
+                    count CNT-PIM;
+                    accept;
+                }
+            }
+            term TR-IGMP {
+                from {
+                    protocol igmp;
+                }
+                then {
+                    policer PC-igmp;
+                    count CNT-IGMP;
+                    accept;
+                }
+            }
+            term TR-MTRACE {
+                from {
+                    destination-address {
+                        224.0.0.0/3;
+                    }
+                }
+                then {
+                    policer PC-mtrace;
+                    count CNT-MTRACE;
+                    accept;
+                }
+            }
+            term TR-ICMP-POLICE-ok {
+                from {
+                    protocol icmp;
+                    icmp-type [ echo-request echo-reply unreachable time-exceeded parameter-problem ];
+                }
+                then {
+                    policer PC-icmp;
+                    count CNT-ICMP-POLICE;
+                    accept;
+                }
+            }
+            term TR-TRACEROUTE-ok {
+                from {
+                    protocol udp;
+                    destination-port 33434-33523;
+                }
+                then {
+                    policer PC-traceroutes;
+                    count CNT-TRACEROUTE-ACC;
+                    accept;
+                }
+            }
+            term TR-ALL-DISCARD {
+                then {
+                    count CNT-FF-RE-DISCARD;
+                    discard;
+                }
+            }
+        }
+        filter FF-RE-VRF-V4 {
+            interface-specific;
+            term TR-FIRST-FRAG-DROP {
+                from {
+                    fragment-offset 0;
+                    fragment-flags more-fragments;
+                }
+                then {
+                    count CNT-FIRST-FRAG-DROP;
+                    discard;
+                }
+            }
+            term TR-NEXT-FRAG-DROP {
+                from {
+                    fragment-offset-except 0;
+                }
+                then {
+                    count CNT-NEXT-FRAG-DROP;
+                    discard;
+                }
+            }
+            term TR-TCP-DOS-PREVENTION-DSC {
+                from {
+                    source-prefix-list {
+                        PL-DEFAULT-V4;
+                        PL-bgp-peers except;
+                        PL-bgp-peers-vrfs except;
+                    }
+                    protocol tcp;
+                    tcp-flags "(syn & !ack) | fin | rst";
+                }
+                then {
+                    count CNT-RE-TCP-DOS-DSC;
+                    discard;
+                }
+            }
+            term TR-TCP-DOS-PREVENTION-ACC {
+                from {
+                    protocol tcp;
+                    tcp-flags "(syn & !ack) | fin | rst";
+                }
+                then {
+                    policer PC-TCP-DOS;
+                    count CNT-TCP-DOS-ACC;
+                    next term;
+                }
+            }
+            term TR-ICMP-POLICE-ok {
+                from {
+                    protocol icmp;
+                    icmp-type [ echo-request echo-reply unreachable time-exceeded parameter-problem ];
+                }
+                then {
+                    policer PC-icmp;
+                    count CNT-ICMP-POLICE;
+                    accept;
+                }
+            }
+            term TR-TRACEROUTE-ok {
+                from {
+                    protocol udp;
+                    destination-port 33434-33523;
+                }
+                then {
+                    policer PC-traceroutes;
+                    count CNT-TRACEROUTE-ok;
+                    accept;
+                }
+            }
+            term TR-BGP-ok {
+                from {
+                    source-prefix-list {
+                        PL-bgp-peers-vrfs;
+                    }
+                    protocol tcp;
+                    port bgp;
+                }
+                then {
+                    count CNT-BGP-ok;
+                    accept;
+                }
+            }
+            term TR-ALL-DSC {
+                then {
+                    count CNT-FF-RE-DSC;
+                    discard;
+                }
+            }
+        }
+    }
+    family inet6 {
+        filter FF-RE-VRF-V6 {
+            interface-specific;
+            term TR-DISCARD-EXTENSION-HEADERS {
+                from {
+                    next-header [ dstopts egp esp fragment gre icmp igmp ipip ipv6 no-next-header routing rsvp sctp ah ];
+                }
+                then {
+                    count CNT-v6-DISCARD-EXTENSION-HEADERS;
+                    discard;
+                }
+            }
+            term TCP-INVALID-DSC {
+                from {
+                    next-header tcp;
+                    tcp-flags "syn & fin";
+                }
+                then {
+                    count CNT-TCP-INVALID-DSC;
+                    discard;
+                }
+            }
+            term TR-BGP-ok {
+                from {
+                    source-prefix-list {
+                        PL-bgp-peers-vrfs-v6;
+                    }
+                    next-header tcp;
+                    port bgp;
+                }
+                then {
+                    count CNT-v6-BGP-ok;
+                    accept;
+                }
+            }
+            term TR-BFD-ok {
+                from {
+                    source-prefix-list {
+                        PL-bgp-peers-vrfs-v6;
+                    }
+                    next-header udp;
+                    port [ 6784 3784 3785 4784 7784 ];
+                }
+                then {
+                    count CNT-BFD-ok;
+                    accept;
+                }
+            }
+            term TR-TRACEROUTES-ok {
+                from {
+                    next-header udp;
+                    destination-port 33435-33450;
+                }
+                then {
+                    policer PC-traceroutes;
+                    count CNT-v6-TRACEROUTES-ok;
+                    accept;
+                }
+            }
+            term TR-DAD-REQUEST-ok {
+                from {
+                    source-address {
+                        ::/128;
+                    }
+                    destination-address {
+                        ff02:0:0:0:0:1:ff00::/104;
+                    }
+                }
+                then {
+                    count CNT-v6-DAD-REQUEST-ok;
+                    accept;
+                }
+            }
+            term TR-DAD-REPLY-ok {
+                from {
+                    source-address {
+                        ff02::1/128;
+                    }
+                    destination-address {
+                        fe80::/64;
+                    }
+                }
+                then {
+                    count CNT-RE-v6-DAD-REPLY-ok;
+                    accept;
+                }
+            }
+            term TR-LOCAL-ok {
+                from {
+                    source-address {
+                        fe80::/64;
+                        ff02:0:0:0:0:1:ff00::/104;
+                        ff02:0:0:0:0:0:0:2/128;
+                        ff02:0:0:0:0:0:0:1/128;
+                    }
+                    destination-address {
+                        fe80::/64;
+                        ff02:0:0:0:0:1:ff00::/104;
+                        ff02:0:0:0:0:0:0:2/128;
+                        ff02:0:0:0:0:0:0:1/128;
+                    }
+                }
+                then {
+                    count CNT-RE-v6-LOCAL-ok;
+                    accept;
+                }
+            }
+            term TR-ND-ok {
+                from {
+                    source-prefix-list {
+                        PL-DIRECT-V6;
+                    }
+                    next-header icmp6;
+                    icmp-type [ router-solicit router-advertisement neighbor-solicit neighbor-advertisement inverse-neighbor-discovery-advertisement inverse-neighbor-discovery-solicitation ];
+                    hop-limit 255;
+                }
+                then {
+                    count CNT-RE-v6-ND-ok;
+                    accept;
+                }
+            }
+            term TR-ICMP-POLICE-ok {
+                from {
+                    next-header icmp6;
+                    icmp-type [ echo-request echo-reply destination-unreachable time-exceeded packet-too-big parameter-problem ];
+                }
+                then {
+                    policer PC-icmp;
+                    count CNT-RE-v6-ICMP-PLC-ok;
+                    accept;
+                }
+            }
+            term TR-DISCARD-UNDEFINED {
+                then {
+                    count CNT-v6-DISCARD-UNDEFINED;
+                    discard;
+                }
+            }
+        }
+    }   
+    policer PC-TCP-DOS {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-dns {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-icmp {
+        if-exceeding {
+            bandwidth-limit 10m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-igmp {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-mtrace {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-netconf {
+        if-exceeding {
+            bandwidth-limit 10m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-ntp {
+        if-exceeding {
+            bandwidth-limit 500k;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-pim {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-snmp-tcp {
+        if-exceeding {
+            bandwidth-limit 5m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-snmp-udp {
+        if-exceeding {
+            bandwidth-limit 5m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-ssh {
+        if-exceeding {
+            bandwidth-limit 50m;
+            burst-size-limit 100k;
+        }
+        then discard;
+    }
+    policer PC-tacacs {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-traceroutes {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-vrrp {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+}
+{% elif 'SW' in hostname %}
+firewall {
+    family inet {
+        filter FF-RE-MGMT-V4 {
+            term TR-ICMP-POLICE-ok {
+                from {
+                    protocol icmp;
+                    icmp-type [ echo-request echo-reply unreachable timestamp time-exceeded parameter-problem ];
+                }
+                then {
+                    policer PC-icmp;
+                    count CNT-ICMP-POLICE;
+                    accept;
+                }
+            }
+            term TR-TRACEROUTE-ok {
+                from {
+                    protocol udp;
+                    destination-port 33434-33523;
+                }
+                then {
+                    policer PC-traceroutes;
+                    count CNT-TRACEROUTE-ACC;
+                    accept;
+                }
+            }
+            term TR-SSH-ok {
+                from {
+                    source-prefix-list {
+                        PL-ssh-list;
+                    }
+                    protocol tcp;
+                    destination-port ssh;
+                }
+                then {
+                    policer PC-ssh;
+                    count CNT-SSH-ok;
+                    accept;
+                }
+            }
+            term TR-NETCONF-ok {
+                from {
+                    source-prefix-list {
+                        PL-netconf-list;
+                    }
+                    protocol tcp;
+                    destination-port 830;
+                }
+                then {
+                    policer PC-netconf;
+                    count CNT-NETCONF-ok;
+                    accept;
+                }
+            }
+            term TR-SNMP-udp-ok {
+                from {
+                    source-prefix-list {
+                        PL-snmpv2-community-clients;
+                        PL-snmpv3-list-udp;
+                    }
+                    protocol udp;
+                    destination-port snmp;
+                }
+                then {
+                    policer PC-snmp-udp;
+                    count CNT-SNMP-udp-ok;
+                    accept;
+                }
+            }
+            term TR-NTP-ok {
+                from {
+                    source-prefix-list {
+                        PL-NTP-SERVERS;
+                        PL-NTP-SOURCE;
+                    }
+                    protocol udp;
+                    source-port ntp;
+                }
+                then {
+                    policer PC-ntp;
+                    count CNT-NTP-ok;
+                    accept;
+                }
+            }
+            term TR-NTP-CONTROL-ok {
+                from {
+                    source-prefix-list {
+                        PL-NTP-SOURCE;
+                    }
+                    protocol udp;
+                    destination-port ntp;
+                }
+                then {
+                    policer PC-ntp;
+                    count CNT-NTP-ok;
+                    accept;
+                }
+            }
+            term TR-DNS-ok {
+                from {
+                    source-prefix-list {
+                        name-servers;
+                    }
+                    protocol udp;
+                    source-port domain;
+                }
+                then {
+                    policer PC-dns;
+                    count CNT-DNS-ok;
+                    accept;
+                }
+            }
+            term TR-TACACS-ok {
+                from {
+                    source-prefix-list {
+                        PL-tacacs-servers;
+                    }
+                    protocol tcp;
+                    source-port tacacs;
+                }
+                then {
+                    policer PC-tacacs;
+                    count CNT-TACACS-ok;
+                    accept;
+                }
+            }
+            term TR-ALL-DISCARD {
+                then {
+                    count CNT-FF-RE-DISCARD;
+                    discard;
+                }
+            }
+        }
+        filter FF-RE-PROTECT-V4 {
+            term TR-ICMP-POLICE-ok {
+                from {
+                    protocol icmp;
+                    icmp-type [ echo-request echo-reply unreachable timestamp time-exceeded parameter-problem ];
+                }
+                then {
+                    policer PC-icmp;
+                    count CNT-ICMP-POLICE;
+                    accept;
+                }
+            }
+            term TR-TRACEROUTE-ok {
+                from {
+                    protocol udp;
+                    destination-port 33434-33523;
+                }
+                then {
+                    policer PC-traceroutes;
+                    count CNT-TRACEROUTE-ACC;
+                    accept;
+                }
+            }
+            term TR-SSH-ok {
+                from {
+                    source-prefix-list {
+                        PL-ssh-list;
+                    }
+                    protocol tcp;
+                    destination-port ssh;
+                }
+                then {
+                    policer PC-ssh;
+                    count CNT-SSH-ok;
+                    accept;
+                }
+            }
+            term TR-NETCONF-ok {
+                from {
+                    source-prefix-list {
+                        PL-netconf-list;
+                    }
+                    protocol tcp;
+                    destination-port 830;
+                }
+                then {
+                    policer PC-netconf;
+                    count CNT-NETCONF-ok;
+                    accept;
+                }
+            }
+            term TR-SNMP-udp-ok {
+                from {
+                    source-prefix-list {
+                        PL-snmpv2-community-clients;
+                        PL-snmpv3-list-udp;
+                    }
+                    protocol udp;
+                    destination-port snmp;
+                }
+                then {
+                    policer PC-snmp-udp;
+                    count CNT-SNMP-udp-ok;
+                    accept;
+                }
+            }
+            term TR-NTP-ok {
+                from {
+                    source-prefix-list {
+                        PL-NTP-SERVERS;
+                        PL-NTP-SOURCE;
+                    }
+                    protocol udp;
+                    source-port ntp;
+                }
+                then {
+                    policer PC-ntp;
+                    count CNT-NTP-ok;
+                    accept;
+                }
+            }
+            term TR-NTP-CONTROL-ok {
+                from {
+                    source-prefix-list {
+                        PL-NTP-SOURCE;
+                    }
+                    protocol udp;
+                    destination-port ntp;
+                }
+                then {
+                    policer PC-ntp;
+                    count CNT-NTP-ok;
+                    accept;
+                }
+            }
+            term TR-DNS-ok {
+                from {
+                    source-prefix-list {
+                        name-servers;
+                    }
+                    protocol udp;
+                    source-port domain;
+                }
+                then {
+                    policer PC-dns;
+                    count CNT-DNS-ok;
+                    accept;
+                }
+            }
+            term TR-TACACS-ok {
+                from {
+                    source-prefix-list {
+                        PL-tacacs-servers;
+                    }
+                    protocol tcp;
+                    source-port tacacs;
+                }
+                then {
+                    policer PC-tacacs;
+                    count CNT-TACACS-ok;
+                    accept;
+                }
+            }
+            term TR-VRRP-ok {
+                from {
+                    destination-prefix-list {
+                        vrrp;
+                    }
+                    protocol [ ah vrrp ];
+                }
+                then {
+                    policer PC-vrrp;
+                    count CNT-VRRP;
+                    accept;
+                }
+            }
+            term TR-IGMP {
+                from {
+                    protocol igmp;
+                }
+                then {
+                    policer PC-igmp;
+                    count CNT-IGMP;
+                    accept;
+                }
+            }
+            term TR-OSPF-ok {
+                from {
+                    source-prefix-list {
+                        PL-DIRECT-v4;
+                        PL-LOOPBACKS;
+                    }
+                    protocol ospf;
+                }
+                then {
+                    count CNT-OSPF-ok;
+                    accept;
+                }
+            }
+            term TR-ALL-DISCARD {
+                then {
+                    count CNT-FF-RE-DISCARD;
+                    discard;
+                }
+            }
+        }
+    }
+    policer PC-TCP-DOS {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-dns {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-icmp {
+        if-exceeding {
+            bandwidth-limit 10m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-igmp {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-mtrace {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-netconf {
+        if-exceeding {
+            bandwidth-limit 10m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-ntp {
+        if-exceeding {
+            bandwidth-limit 500k;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-pim {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-snmp-tcp {
+        if-exceeding {
+            bandwidth-limit 5m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-snmp-udp {
+        if-exceeding {
+            bandwidth-limit 5m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-ssh {
+        if-exceeding {
+            bandwidth-limit 50m;
+            burst-size-limit 100k;
+        }
+        then discard;
+    }
+    policer PC-tacacs {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-traceroutes {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-vrrp {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+}
+{% else %}{# JRR200 #}
+firewall {
+    family inet {
+        filter FF-COS-RE-FILTER {
+            term TR-TCP-BASED {
+                from {
+                    protocol tcp;
+                    port [ tacacs ];
+                }
+                then {
+                    dscp 0;
+                    accept;
+                }
+            }
+            term TR-UDP-BASED {
+                from {
+                    protocol udp;
+                    port [ snmp snmptrap syslog ];
+                }
+                then {
+                    dscp 0;
+                    accept;
+                }
+            }
+            term TR-ICMP {
+                from {
+                    protocol icmp;
+                }
+                then {
+                    dscp 0;
+                    accept;
+                }
+            }
+            term TR-DEFAULT {
+                then {
+                    dscp 48;
+                    accept;
+                }
+            }
+        }   
+        filter FF-RE-PROTECT-V4 {
+            interface-specific;
+            term TR-TCP-DOS-PREVENTION-DSC {
+                from {
+                    source-prefix-list {
+                        PL-DEFAULT-V4;
+                        PL-bgp-peers except;
+                        PL-bgp-peers-vrfs except;
+                        PL-LOOPBACKS except;
+                        PL-ssh-list except;
+                        PL-tacacs-servers except;
+                    }
+                    protocol tcp;
+                    tcp-flags "(syn & !ack) | fin | rst";
+                }
+                then {
+                    count CNT-TCP-DOS-DSC;
+                    discard;
+                }
+            }
+            term TR-TCP-DOS-PREVENTION-ok {
+                from {
+                    protocol tcp;
+                    tcp-flags "(syn & !ack) | fin | rst";
+                }
+                then {
+                    policer PC-TCP-DOS;
+                    count CNT-TCP-DOS-ok;
+                    next term;
+                }
+            }
+            term TR-SSH-ok {
+                from {
+                    source-prefix-list {
+                        PL-ssh-list;
+                    }
+                    protocol tcp;
+                    port ssh;
+                }
+                then {
+                    policer PC-ssh;
+                    count CNT-SSH-ok;
+                    accept;
+                }
+            }
+            term TR-NETCONF-ok {
+                from {
+                    source-prefix-list {
+                        PL-netconf-list;
+                    }
+                    protocol tcp;
+                    destination-port 830;
+                }
+                then {
+                    policer PC-netconf;
+                    count CNT-NETCONF-ok;
+                    accept;
+                }
+            }
+            term TR-TACACS-ok {
+                from {
+                    source-prefix-list {
+                        PL-tacacs-servers;
+                    }
+                    protocol tcp;
+                    port tacacs;
+                }
+                then {
+                    policer PC-tacacs;
+                    count CNT-TACACS-ok;
+                    accept;
+                }
+            }
+            term TR-BGP-ok {
+                from {
+                    source-prefix-list {
+                        PL-bgp-peers;
+                        PL-bgp-peers-vrfs;
+                    }
+                    protocol tcp;
+                    port bgp;
+                }
+                then {
+                    count CNT-BGP-ok;
+                    accept;
+                }
+            }
+            term TR-SNMP-tcp-ok {
+                from {
+                    source-prefix-list {
+                        PL-snmpv3-list-tcp;
+                    }
+                    protocol tcp;
+                    destination-port snmp;
+                }
+                then {
+                    policer PC-snmp-tcp;
+                    count CNT-SNMP-tcp-ok;
+                    accept;
+                }
+            }
+            term TR-SNMP-udp-ok {
+                from {
+                    source-prefix-list {
+                        PL-snmpv2-community-clients;
+                        PL-snmpv3-list-udp;
+                    }
+                    protocol udp;
+                    destination-port snmp;
+                }
+                then {
+                    policer PC-snmp-udp;
+                    count CNT-SNMP-udp-ok;
+                    accept;
+                }
+            }
+            term TR-NTP-ok {
+                from {
+                    source-prefix-list {
+                        PL-NTP-SERVERS;
+                        PL-NTP-SOURCE;
+                    }
+                    protocol udp;
+                    port ntp;
+                }
+                then {
+                    policer PC-ntp;
+                    count CNT-NTP-ok;
+                    accept;
+                }
+            }
+            term TR-DNS-ok {
+                from {
+                    source-prefix-list {
+                        name-servers;
+                    }
+                    protocol udp;
+                    port domain;
+                }
+                then {
+                    policer PC-dns;
+                    count CNT-DNS-ok;
+                    accept;
+                }
+            }
+            term TR-ICMP-POLICE-ok {
+                from {
+                    protocol icmp;
+                    icmp-type [ echo-request echo-reply unreachable time-exceeded parameter-problem ];
+                }
+                then {
+                    policer PC-icmp;
+                    count CNT-ICMP-POLICE;
+                    accept;
+                }
+            }
+            term TR-TRACEROUTE-ok {
+                from {
+                    protocol udp;
+                    destination-port 33434-33523;
+                }
+                then {
+                    policer PC-traceroutes;
+                    count CNT-TRACEROUTE-ok;
+                    accept;
+                }
+            }
+            term TR-ALL-DISCARD {
+                then {
+                    count CNT-FF-RE-DISCARD;
+                    discard;
+                }
+            }
+        }
+    }
+    policer PC-TCP-DOS {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-dns {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-icmp {
+        if-exceeding {
+            bandwidth-limit 10m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-igmp {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-mtrace {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-netconf {
+        if-exceeding {
+            bandwidth-limit 10m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-ntp {
+        if-exceeding {
+            bandwidth-limit 500k;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-pim {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-snmp-tcp {
+        if-exceeding {
+            bandwidth-limit 5m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-snmp-udp {
+        if-exceeding {
+            bandwidth-limit 5m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-ssh {
+        if-exceeding {
+            bandwidth-limit 50m;
+            burst-size-limit 100k;
+        }
+        then discard;
+    }
+    policer PC-tacacs {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-traceroutes {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+    policer PC-vrrp {
+        if-exceeding {
+            bandwidth-limit 1m;
+            burst-size-limit 15k;
+        }
+        then discard;
+    }
+}
+{% endif %}
+policy-options {
+    prefix-list PL-ssh-list {
+        /* shadow */
+        10.239.96.7/32;
+        /* ghost */
+        10.152.170.200/32;
+        /* CPN4.0 Core Links */
+        10.100.40.0/23;
+        /* Citrix */
+        10.140.232.0/23;
+    }
+    prefix-list PL-netconf-list {
+        /* shadow */
+        10.239.96.7/32;
+        /* ghost */
+        10.152.170.200/32;
+        /* CPN4.0 Core Links */
+        10.100.40.0/23;
+        /* Citrix */
+        10.140.232.0/23;
+    }
+    prefix-list PL-snmpv3-list-tcp {
+{% for ip in snmp.v3.clients %}
+        {{ ip }};
+{% endfor %}
+        apply-path "snmp v3 target-address <*> address <*>";
+    }
+    prefix-list PL-snmpv3-list-udp {
+{% for ip in snmp.v3.clients %}
+        {{ ip }};
+{% endfor %}
+        apply-path "snmp v3 target-address <*> address <*>";
+    }
+    prefix-list PL-snmpv2-community-clients {
+        apply-path "snmp community <*> clients <*>";
+    }
+    prefix-list PL-DEFAULT-V4 {
+        0.0.0.0/0;
+    }
+    prefix-list PL-tacacs-servers {
+        apply-path "system tacplus-server <*>";
+    }
+    prefix-list PL-bgp-peers {
+       apply-path "protocols bgp group <*> neighbor <*.*>";
+    } 
+    prefix-list PL-bgp-peers-vrfs {
+       apply-path "routing-instances <*> protocols bgp group <*> neighbor <*.*>";
+    } 
+    prefix-list PL-LDP-LIST {
+        10.100.104.0/24;
+        10.255.0.0/16;
+        apply-path "interfaces <*> unit <*> family inet address <*>";
+    }  
+    prefix-list PL-LOOPBACKS {
+        10.100.104.0/24;
+    }
+    prefix-list PL-NTP-SERVERS {
+        apply-path "system ntp server <*>";
+    }
+    prefix-list PL-NTP-SOURCE {
+        127.0.0.1/32;
+        apply-path "system ntp source-address <*>";
+    }
+    prefix-list name-servers {
+        apply-path "system name-server <*>";
+    }
+    prefix-list vrrp {
+        224.0.0.18/32;
+    }
+    prefix-list PL-DIRECT-v4 {
+        apply-path "interfaces <*> unit <*> family inet address <*>";
+    }
+    prefix-list PL-DIRECT-V6 { 
+        apply-path "interfaces <*> unit <*> family inet6 address <*>";
+    }
+    prefix-list PL-bgp-peers-vrfs-v6 {
+        apply-path "routing-instances <*> protocols bgp group <*> neighbor <*:*>";
+    }
+}

@@ -1,0 +1,25 @@
+PHASE 3
+#
+VMX_DISK /vmm/data/user_disks/btodorovic/junos-x86-64-25.2R1.9.vmdk
+#
+ID 0
+#
+IPv4    100.1.0.0/16
+LBv4    100.0.0.0/16
+IPv6    2001:cafe:1::/48
+LBv6    2001:cafe:0::/48
+PREFIX  30      64
+#
+AS 15924
+#
+isis	rr1	pp1
+#
+isis	pp1	pp2
+isis	pp1	pe1
+isis	pp2	pe2
+#
+noigp	pe1	ce1
+noigp	pe2	ce2
+isis	ce1	ce2
+#
+BGP	rr1	pe1	pe2

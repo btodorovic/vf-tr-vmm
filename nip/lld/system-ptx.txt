@@ -1,0 +1,308 @@
+groups {
+    GR-SYSLOG {                                      # Group template for syslog - common params for syslog servers
+        system {
+            syslog {
+                host <*> {
+                    authorization any;
+                    cron any;
+                    daemon any;
+                    kernel any;
+                    user any;
+                    change-log any;
+                    interactive-commands any;
+                    explicit-priority;
+                    log-prefix $HOSTNAME$;                        # Router hostname
+                    source-address $SYSLOG_SOURCE_IP_ADDRESS$;    # lo0.0 address for IN-BAND MGMT / MGMT Ethernet VIP for OOB MGMT
+                    routing-instance mgmt_junos;                  # ONLY IF OOB MGMT IS ACTIVE
+                }
+            }
+        }
+    }
+}
+system {
+    root-authentication {
+        encrypted-password "$ENCRYPTED-PASSWORD$";
+    } 
+    inactive: authentication-order tacplus;         ### ACTIVATE when TACACS+ gets activated
+    switchover-on-routing-crash;
+    processes {
+        routing failover other-routing-engine;
+    }
+    commit {
+        persist-groups-inheritance;
+        synchronize;
+    }
+    scripts {
+        synchronize;
+    }
+    ports {
+        console {
+            log-out-on-disconnect;	                 
+            inactive: insecure;                     ### ACTIVATE when TACACS+ gets activated 
+            type vt100;
+        }
+    }
+    domain-name $DOMAIN-NAME$;
+    name-server {
+        $DNS-IP-ADDRESS$ $MGMT_RI_KNOB$;            ### $MGMT_RI_KNOB$ == "routing-instance mgmt_junos" (OOB MGMT ONLY!);               
+        # ... Repeat as necessary - add more DNS servers if required
+    }
+    time-zone Europe/Ankara;
+    no-ping-record-route;
+    no-ping-time-stamp;
+    arp {
+        gratuitous-arp-on-ifup;
+    }
+    tacplus-server {
+        $TACPLUS-SERVER-IP$ {                        ### Repeat as necessary, for all TACACS+ servers
+            secret "$ENCRYPTED-PASSWORD$"; 
+            timeout 3;
+            source-address $LO0-VFNETMNG-IP$;            ### Management plane lo0.0 address
+            single-connection;
+            routing-instance VFNETMNG;               ## VF TR specific
+        }
+    }
+    accounting {
+        events [ login change-log interactive-commands ];
+        destination {
+            tacplus {
+                server {
+                    $TACPLUS-SERVER-IP$ {            ### Repeat as necessary, for all TACACS+ servers
+                        port 49;
+                        secret "$ENCRYPTED-PASSWORD$";  
+                        timeout 3;
+                        single-connection;
+                        source-address $LO0-VFNETMNG-IP$;    ### Management plane lo0.0 address
+                        routing-instance VFNETMNG;  ## VF TR specific
+                    }
+                }
+            }
+        }
+    }
+ 
+    login {
+        idle-timeout 15;
+        retry-options {
+            tries-before-disconnect 5;
+            backoff-threshold 3;
+            backoff-factor 5;
+            lockout-period 10;
+        }
+        password {
+            minimum-length 16;
+            maximum-length 20;
+            change-type set-transitions;
+            minimum-changes 4;
+            format sha256;
+        }
+        class full_access {
+            idle-timeout 30;
+            permissions all;
+        }
+        class limited_access {
+            idle-timeout 15;
+            login-alarms;
+            permissions [ network trace view view-configuration ];
+            allow-commands "show .*";
+            deny-commands "(clear|load|op|request|start|test).*";
+        }
+        class readonly {
+            idle-timeout 30;
+            permissions [ firewall interface network routing view ];
+        }
+        user remote {
+            full-name "TACACS+ authenticated user - full rights";
+            uid 2001;
+            class full_access;
+        }
+        user limitedaccess {
+            full-name "TACACS+ authenticated user - limited commands";
+            uid 2003;
+            class limited_access;
+        }
+        user readonly {
+            full-name "TACACS+ authenticated user - readonly rights";
+            uid 2002;
+            class readonly;
+        }
+        user $FALLBACK_LOGIN_NAME$ {                       ### Last resort username (e.g. vodafone1)
+            uid 2005;		
+            class super-user;		
+            authentication {		
+                encrypted-password "$ENCRYPTED-PASSWORD$"; ### One-way password hash (MD5/SHA1)
+            }
+        }
+    }
+    ntp {
+        server $NTP-SERVER-IP$ $MGMT_RI_KNOB$;                     # $MGMT_RI_KNOB$ == "routing-instance mgmt_junos" (OOB MGMT ONLY!)
+        # ...
+        source-address $NTP_SOURCE_IP_ADDRESS$ $MGMT_RI_KNOB$;     # lo0.0 address for IN-BAND MGMT / MGMT Ethernet VIP for OOB MGMT
+    }
+    services {
+        ssh {
+            root-login deny;
+            protocol-version v2;
+            max-sessions-per-connection 32;
+            client-alive-count-max 3;
+            client-alive-interval 120;
+            hostkey-algorithm no-ssh-dss;
+            ciphers [ aes128-ctr "aes128-gcm@openssh.com" aes192-ctr aes256-ctr "aes256-gcm@openssh.com" ];
+            macs [ hmac-sha2-256 "hmac-sha2-256-etm@openssh.com" hmac-sha2-512 "hmac-sha2-512-etm@openssh.com" ];
+            key-exchange [ curve25519-sha256 ecdh-sha2-nistp256 ecdh-sha2-nistp384 ecdh-sha2-nistp521 group-exchange-sha2 ];
+        }
+        netconf {
+            ssh {
+                connection-limit 10;
+                rate-limit 10;
+            }
+            rfc-compliant;                          # Make the NETCONF sessions backwards compatible with RFC4741
+            yang-compliant;                         # Make the NETCONF sessions compliant to YANG schemas
+            yang-modules {
+                device-specific;                    # Serve YANG modules specific to this device
+                emit-extensions;                    # Enable serving of Junos YANG extension modules
+            }
+        }
+    }
+ 
+    syslog {
+        archive size 10m files 10 world-readable;
+        time-format year millisecond;
+        host $SYSLOG_SERVER_IP$ {                             # IP address of the syslog server
+            apply-groups GR-SYSLOG;
+        }
+        # ... Repeat previous section for all syslog servers
+
+        file interactive-commands {
+            interactive-commands any;
+            match UI_CMDLINE_READ_LINE;
+        }
+        file messages {
+            any notice;
+            authorization any;
+            daemon info;
+            match "!.*(PING_TEST_COMPLETED|RPM_TEST_RESULTS|RPD_RT_HWM_NOTICE|aftd-trio|startup_time update|root@re[01] as root: cmd).*";
+        }
+        file firewall-log {
+            firewall any;
+            archive size 5m;
+        }
+        user * {
+            any critical;
+        }
+    }
+}
+routing-options { 
+    nonstop-routing;
+}
+chassis {
+    redundancy {                                   
+        routing-engine 0 master;
+        routing-engine 1 backup;
+        graceful-switchover;
+    }
+    routing-engine { 
+        on-disk-failure disk-failure-action reboot;
+    }
+    alarm {
+        management-ethernet {              ### Use this if the router is managed in-band only
+            link-down ignore;   
+        }
+    }
+}
+interfaces {
+    lo0 {
+        unit 1500 {
+            family inet {
+                address $LO0-VFNETMNG-IP$/32;
+            }
+        }
+    }
+}
+routing-instances {
+    VFNETMNG {
+        instance-type vrf;
+        vrf-table-label;
+        interface lo0.1500;
+        route-distinguisher $LO0-VFNETMNG-IP$:1723;
+        vrf-import VRF-VFNETMNG-IMPORT;
+        vrf-export VRF-VFNETMNG-EXPORT;
+    }
+}
+policy-options {
+    policy-statement VRF-VFNETMNG-EXPORT {
+        term EXPORT {
+            from {
+                protocol direct;
+                route-filter $LO0-VFNETMNG-IP$/32 exact;
+            }
+            then {
+                community add RT-VFNETMNG;
+                accept;
+            }
+        }
+        then reject;
+    }
+    policy-statement VRF-VFNETMNG-IMPORT {
+        term IMPORT {
+            from community RT-VFNETMNG;
+            then accept;
+        }
+        then reject;
+    }
+    community RT-VFNETMNG members target:15924:1723;
+}
+interfaces {                                          ### Only if OOB MGMT is used, otherwise omit
+    re0:mgmt-0 {
+        unit 0 {
+            family inet {
+                address $FXP0-VIP$/$FXP0-PREFLEN$ {
+                    master-only;
+                }
+                address $RE0-FXP0-IPADDR$/$FXP0-PREFLEN$;
+            }
+        }
+    }
+    re1:mgmt-0 {
+        unit 0 {
+            family inet {
+                address $FXP0-VIP$/$FXP0-PREFLEN$ {
+                    master-only;
+                }
+                address $RE1-FXP0-IPADDR$/$FXP0-PREFLEN$;
+            }
+        }
+    }
+}
+system {
+    management-instance;                               ### Enables routing-instance mgmt_junos (OOB MGMT ONLY!)
+    host-name $HOSTNAME$;
+    trace application {
+        all {
+            node {
+                re0 level emergency;
+                re1 level emergency;
+                fpc0 level emergency;
+                fpc1 level emergency;
+                fpc2 level emergency;
+                fpc3 level emergency;
+                fpc4 level emergency;
+                fpc5 level emergency;
+                fpc6 level emergency;
+                fpc7 level emergency;
+            }
+        }
+    }
+}
+routing-instances {
+    mgmt_junos {
+        routing-options {
+            static {
+                route 0.0.0.0/0 {
+                    next-hop $FXP0-GW$;                 ### Default gateway on the OOB DCN LAN segment
+                    retain;
+                    no-readvertise;
+                }
+            }
+        }
+    }
+}

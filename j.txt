@@ -1,0 +1,52 @@
+set policy-options policy-statement PS-IBGP-EXPORT term 0 from route-filter 0.0.0.0/0 exact
+set policy-options policy-statement PS-IBGP-EXPORT term 0 from community TTNET_TUZLA
+set policy-options policy-statement PS-IBGP-EXPORT term 0 from community VCNO_ESENTEPE
+set policy-options policy-statement PS-IBGP-EXPORT term 0 from community VCNO_ESENYURT
+set policy-options policy-statement PS-IBGP-EXPORT term 0 from community VCNO_IZMIR
+set policy-options policy-statement PS-IBGP-EXPORT term 0 from community VCNO_TUZLA
+set policy-options policy-statement PS-IBGP-EXPORT term 0 from community INTEROUTE
+set policy-options policy-statement PS-IBGP-EXPORT term 0 from community SEABONE
+set policy-options policy-statement PS-IBGP-EXPORT term 0 from community Level3_Esenyurt
+set policy-options policy-statement PS-IBGP-EXPORT term 0 then accept
+set policy-options policy-statement PS-IBGP-EXPORT term 5 from prefix-list Voice-Customers
+set policy-options policy-statement PS-IBGP-EXPORT term 5 then community add Customer-Voice-Subnetted
+set policy-options policy-statement PS-IBGP-EXPORT term 5 then next term
+set policy-options policy-statement PS-IBGP-EXPORT term 10 from route-filter 10.135.198.176/28 orlonger
+set policy-options policy-statement PS-IBGP-EXPORT term 10 from route-filter 10.135.193.80/28 orlonger
+set policy-options policy-statement PS-IBGP-EXPORT term 10 from route-filter 10.135.54.128/30 orlonger
+set policy-options policy-statement PS-IBGP-EXPORT term 10 from route-filter 10.135.198.192/29 orlonger
+set policy-options policy-statement PS-IBGP-EXPORT term 10 from route-filter 10.135.198.168/29 orlonger
+set policy-options policy-statement PS-IBGP-EXPORT term 10 from route-filter 10.135.198.232/29 orlonger
+set policy-options policy-statement PS-IBGP-EXPORT term 10 from route-filter 213.161.147.0/24 orlonger
+set policy-options policy-statement PS-IBGP-EXPORT term 10 from route-filter 176.235.122.0/24 orlonger
+set policy-options policy-statement PS-IBGP-EXPORT term 10 from route-filter 10.135.201.216/29 orlonger
+set policy-options policy-statement PS-IBGP-EXPORT term 10 then accept
+set policy-options policy-statement PS-IBGP-EXPORT term 20 from community ESY_INT1_Arbor_Ozel_Community
+set policy-options policy-statement PS-IBGP-EXPORT term 20 from community ESY_TMS_Tasinma_Gecici
+set policy-options policy-statement PS-IBGP-EXPORT term 20 from community INTEROUTE
+set policy-options policy-statement PS-IBGP-EXPORT term 20 from community ISG_SOL_RR_Deny
+set policy-options policy-statement PS-IBGP-EXPORT term 20 from community MOBIL-INTERNAL-DDOS-MITIGATION_IZMIR
+set policy-options policy-statement PS-IBGP-EXPORT term 20 from community MOBIL-INTERNAL-DDOS-MITIGATION
+set policy-options policy-statement PS-IBGP-EXPORT term 20 from community [ NSU_IPBB_GNS_1 NSU_IPBB_GNS_2 NSU_IPBB_TZL_1 NSU_IPBB_TZL_2 ]
+set policy-options policy-statement PS-IBGP-EXPORT term 20 from community TT-BLACKHOLE
+set policy-options policy-statement PS-IBGP-EXPORT term 20 then reject
+set policy-options policy-statement PS-IBGP-EXPORT term 30 from route-filter 10.190.30.113/32 exact
+set policy-options policy-statement PS-IBGP-EXPORT term 30 from route-filter 10.190.30.115/32 exact
+set policy-options policy-statement PS-IBGP-EXPORT term 30 then reject
+set policy-options policy-statement PS-IBGP-EXPORT term 10 from prefix-list Reject-RFC1918
+set policy-options policy-statement PS-IBGP-EXPORT term 100 then reject
+set policy-options policy-statement PS-IBGP-EXPORT term 110 from prefix-list TR_VOICE_BACKBONE
+set policy-options policy-statement PS-IBGP-EXPORT term 110 then reject
+set policy-options policy-statement PS-IBGP-EXPORT term 120 from as-path AS-LOCAL
+set policy-options policy-statement PS-IBGP-EXPORT term 120 then accept
+set policy-options policy-statement PS-IBGP-EXPORT term 130 from community BGP-Customers
+set policy-options policy-statement PS-IBGP-EXPORT term 130 then accept next-hop self
+set policy-options policy-statement PS-IBGP-EXPORT term 160 from community [ NSU_IPBB_GNS_1 NSU_IPBB_GNS_2 NSU_IPBB_TZL_1 NSU_IPBB_TZL_2 ]
+set policy-options policy-statement PS-IBGP-EXPORT term 160 then accept
+set policy-options policy-statement PS-IBGP-EXPORT term 180 from community tier1_global_community
+set policy-options policy-statement PS-IBGP-EXPORT term 180 then accept
+set policy-options policy-statement PS-IBGP-EXPORT term 190 from community TTNET_IZMIR
+set policy-options policy-statement PS-IBGP-EXPORT term 190 from as-path TNET_OZEL
+set policy-options policy-statement PS-IBGP-EXPORT term 190 then accept
+set policy-options policy-statement PS-IBGP-EXPORT term 210 from community [ TTNet TTNET-ESN-KURUMSAL TTNET_ESENTEPE ]
+set policy-options policy-statement PS-IBGP-EXPORT term 210 then accept

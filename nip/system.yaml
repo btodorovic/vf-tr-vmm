@@ -1,0 +1,63 @@
+mgmt_ri_knob:
+
+fxp0:
+    re0:
+    re1:
+    vip:
+    gw:
+    preflen:
+
+hostname:
+dns:
+    domain:
+    ip:
+        -
+
+login:
+    root_encrypted_password:
+    fallback_login_name: 
+    fallback_encrypted_password:
+
+tacplus:
+    source_ip:
+    key:
+    ip:
+        -
+ntp:
+    source_ip:
+    ip:
+        -
+
+syslog:
+    source_ip:
+    ip:
+        -
+
+lo0:
+    ip:
+    ipv6:
+    clns:
+    vfnetmng_ip: 
+
+isis:
+    hello_password:
+    lsp_pasword:
+    sr_ipv4_index:
+
+rpki:
+    port:
+    ip:
+        -
+
+bgp:
+    afisafi:
+        - inet unicast
+        - inet labeled-unicast
+        - inet6 labeled-unicast explicit-null
+        - inet-vpn unicast
+        - inet6-vpn unicast
+        - evpn signaling
+
+    rr:
+        - ip:
+          hostname:
